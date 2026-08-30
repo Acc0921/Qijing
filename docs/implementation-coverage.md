@@ -15,6 +15,6 @@
 | CPU 调节 | `feature.tuning.CpuTuner` / `CpuTuningController` | 已有参数范围校验、执行状态和 command 入口 |
 | 内存与 ZRAM | `feature.tuning.MemoryTuner` / `MemoryTuningController` | 已有 swappiness/ZRAM 参数校验、执行状态和 command 入口 |
 | FPS 监控 | `feature.telemetry.FpsMonitor` / `FpsSessionAnalyzer` | 已有 session、采样、平均/极值/P95 frame time/jank 摘要 |
-| 新 UI | `MainActivity` | 已有 Compose 首页和六个模块入口卡片 |
+| 新 UI | `MainActivity` | 已有可点击模块导航、M1 总览、M2 搜索筛选、M3 场景保存和 M4/M5/M8 状态页 |
 
 下一阶段按此表逐项替换内存实现：先落地持久化 schema 和测试，再接入 root/ADB/Shizuku 后端，最后实现真实设备采集。
