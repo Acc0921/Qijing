@@ -20,7 +20,7 @@ class SharedPreferencesNewDataStore(context: Context) : NewDataStore {
         put("backends", JSONArray(snapshot.availableBackends.map { it.name })); put("capabilities", JSONArray(snapshot.capabilities.toList()))
     }.toString()).apply() }
     override fun device(): DeviceSnapshot? = prefs.getString("device", null)?.let { raw -> JSONObject(raw).let { o ->
-        DeviceSnapshot(o.optString("model"), o.optString("manufacturer"), o.optString("android"), o.optString("soc", null),
+        DeviceSnapshot(o.optString("model"), o.optString("manufacturer"), o.optString("android"), o.stringOrNull("soc"),
             o.optJSONArray("backends").strings().mapNotNull { runCatching { ExecutionBackend.valueOf(it) }.getOrNull() }.toSet(), o.optJSONArray("capabilities").strings().toSet())
     } }
 
@@ -39,10 +39,11 @@ class SharedPreferencesNewDataStore(context: Context) : NewDataStore {
         put("memory", JSONObject().apply { put("enabled", s.memory.zramEnabled); put("size", s.memory.zramSizeBytes); put("algorithm", s.memory.compressionAlgorithm); put("swappiness", s.memory.swappiness) })
     }
     private fun sceneFromJson(o: JSONObject) = SceneProfile(o.optString("id"), o.optString("name"), o.optJSONArray("packages").strings().toSet(),
-        o.optJSONObject("cpu")?.let { c -> CpuIntent(c.optString("governor", null), c.longOrNull("min"), c.longOrNull("max"), c.optJSONArray("cores")?.ints()?.toSet()) } ?: CpuIntent(),
-        o.optJSONObject("memory")?.let { m -> MemoryIntent(m.boolOrNull("enabled"), m.longOrNull("size"), m.optString("algorithm", null), m.intOrNull("swappiness")) } ?: MemoryIntent(), o.optInt("priority"), o.optBoolean("enabled", true))
+        o.optJSONObject("cpu")?.let { c -> CpuIntent(c.stringOrNull("governor"), c.longOrNull("min"), c.longOrNull("max"), c.optJSONArray("cores")?.ints()?.toSet()) } ?: CpuIntent(),
+        o.optJSONObject("memory")?.let { m -> MemoryIntent(m.boolOrNull("enabled"), m.longOrNull("size"), m.stringOrNull("algorithm"), m.intOrNull("swappiness")) } ?: MemoryIntent(), o.optInt("priority"), o.optBoolean("enabled", true))
 
     private fun JSONObject.longOrNull(key: String): Long? = if (has(key) && !isNull(key)) optLong(key) else null
+    private fun JSONObject.stringOrNull(key: String): String? = if (has(key) && !isNull(key)) optString(key) else null
     private fun JSONObject.intOrNull(key: String): Int? = if (has(key) && !isNull(key)) optInt(key) else null
     private fun JSONObject.boolOrNull(key: String): Boolean? = if (has(key) && !isNull(key)) optBoolean(key) else null
     private fun JSONArray?.strings(): List<String> = if (this == null) emptyList() else (0 until length()).map { optString(it) }

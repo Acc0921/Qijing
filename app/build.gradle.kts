@@ -4,7 +4,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-android { namespace = "com.scenepilot"; compileSdk = 35
+android { namespace = "com.scenepilot"; compileSdk = 35; buildToolsVersion = "35.0.0"
     defaultConfig { applicationId = "com.scenepilot"; minSdk = 23; targetSdk = 35; versionCode = 1; versionName = "0.1.0" }
 }
 
