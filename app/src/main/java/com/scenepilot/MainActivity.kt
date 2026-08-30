@@ -28,7 +28,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.scenepilot.core.data.InMemoryNewDataStore
+import com.scenepilot.core.data.NewDataStore
+import com.scenepilot.core.data.SharedPreferencesNewDataStore
 import com.scenepilot.core.device.AndroidDeviceCapabilityProbe
 import com.scenepilot.core.model.ExecutionBackend
 import com.scenepilot.feature.apps.AppListController
@@ -46,7 +47,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun ScenePilotApp() {
-    val store = remember { InMemoryNewDataStore() }
+    val context = LocalContext.current
+    val store = remember(context) { SharedPreferencesNewDataStore(context) }
     var selected by remember { mutableStateOf("M1") }
     val modules = remember { listOf("设备总览" to "M1", "应用列表" to "M2", "应用场景" to "M3", "CPU 调节" to "M4", "内存与 ZRAM" to "M5", "FPS 监控" to "M8") }
     MaterialTheme {
@@ -67,7 +69,7 @@ private fun ScenePilotApp() {
 }
 
 @Composable
-private fun ModulePage(code: String, store: InMemoryNewDataStore) {
+private fun ModulePage(code: String, store: NewDataStore) {
     when (code) {
         "M1" -> {
             val overview = remember { OverviewPresenter(AndroidDeviceCapabilityProbe(), store).load() }
@@ -87,7 +89,7 @@ private fun ModulePage(code: String, store: InMemoryNewDataStore) {
 }
 
 @Composable
-private fun AppListPage(store: InMemoryNewDataStore) {
+private fun AppListPage(store: NewDataStore) {
     val context = LocalContext.current
     val controller = remember { AppListController(ApplicationCatalog(context), store) }
     var query by remember { mutableStateOf("") }
@@ -103,12 +105,14 @@ private fun AppListPage(store: InMemoryNewDataStore) {
 }
 
 @Composable
-private fun SceneEditorPage(store: InMemoryNewDataStore) {
+private fun SceneEditorPage(store: NewDataStore) {
     var draft by remember { mutableStateOf(SceneDraft("scene-${System.currentTimeMillis()}", "")) }
+    var packageInput by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
     Card(modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("应用场景", style = MaterialTheme.typography.titleLarge)
         OutlinedTextField(draft.name, { draft = draft.copy(name = it) }, label = { Text("场景名称") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(packageInput, { packageInput = it; draft = draft.copy(packages = it.split(',').map(String::trim).filter(String::isNotEmpty).toSet()) }, label = { Text("应用包名（逗号分隔）") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(draft.governor, { draft = draft.copy(governor = it) }, label = { Text("Governor（可选）") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(draft.swappiness, { draft = draft.copy(swappiness = it) }, label = { Text("Swappiness 0-200") }, modifier = Modifier.fillMaxWidth())
         Button(onClick = { val errors = SceneDraftStore(store).save(draft); message = if (errors.isEmpty()) "场景已保存" else errors.joinToString("；") }) { Text("保存场景") }
