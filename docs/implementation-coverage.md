@@ -12,8 +12,11 @@
 | 设备总览 | `feature.overview.OverviewPresenter` | 已有设备快照、应用数和场景数状态聚合，UI 使用持久化数据层 |
 | 应用列表 | `feature.apps.ApplicationCatalog` / `AppListController` | 已有系统应用查询、搜索和系统应用筛选 |
 | 应用场景 | `feature.scene.SceneDraft` / `SceneDraftStore` | 已有表单校验、应用包名绑定、意图转换和持久化保存 |
+| 场景选择 | `core.scene.SceneSelector` | 按前台包名、启用状态和优先级纯函数选择场景 |
 | CPU 调节 | `feature.tuning.CpuTuner` / `CpuTuningController` | 已有参数范围校验、执行状态和 command 入口 |
+| CPU 状态 | `feature.tuning.CpuStatusReader` | 只读核心在线数、governor 和频率范围 |
 | 内存与 ZRAM | `feature.tuning.MemoryTuner` / `MemoryTuningController` | 已有 swappiness/ZRAM 参数校验、执行状态和 command 入口 |
+| 内存状态 | `feature.tuning.MemoryStatusReader` | 只读 MemTotal/MemAvailable、ZRAM 容量和压缩算法 |
 | FPS 监控 | `feature.telemetry.FpsMonitor` / `FpsSessionAnalyzer` | 已有 session、采样、平均/极值/P95 frame time/jank 摘要 |
 | 新 UI | `MainActivity` | 已有可点击模块导航、M1 总览、M2 搜索筛选、M3 场景保存和 M4/M5/M8 状态页 |
 
