@@ -9,7 +9,7 @@
 | 设备能力探测 | `core.device.DeviceCapabilityProbe` / `BackendDetector` | 只读探测 CPU、内存、ZRAM、GPU 路径及后端可用性 |
 | 场景应用事务 | `core.scene.SceneEngine` | 已将 CPU/内存意图转换为结构化 command，并写入任务日志 |
 | 全新数据层 | `core.data.NewDataStore` | 已有设备、应用、场景、遥测新模型；无迁移 API |
-| 任务与错误记录 | `core.logging.TaskLogStore` | 已有内存实现，后续替换为持久化实现 |
+| 任务与错误记录 | `core.logging.TaskLogStore` / `SharedPreferencesTaskLogStore` | 已有内存和持久化实现，最多保留 500 条并支持重启后读取 |
 | 设备总览 | `feature.overview.OverviewPresenter` | 已有设备快照、应用数和场景数状态聚合，UI 使用持久化数据层 |
 | 应用列表 | `feature.apps.ApplicationCatalog` / `AppListController` | 已有系统应用查询、搜索和系统应用筛选 |
 | 应用场景 | `feature.scene.SceneDraft` / `SceneDraftStore` | 已有表单校验、应用包名绑定、意图转换和持久化保存 |
