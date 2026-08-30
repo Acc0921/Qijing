@@ -12,9 +12,9 @@
 | 设备总览 | `feature.overview.OverviewPresenter` | 已有设备快照、应用数和场景数状态聚合 |
 | 应用列表 | `feature.apps.ApplicationCatalog` / `AppListController` | 已有系统应用查询、搜索和系统应用筛选 |
 | 应用场景 | `feature.scene.SceneDraft` / `SceneDraftStore` | 已有表单校验、意图转换和新数据层保存 |
-| CPU 调节 | `feature.tuning.CpuTuner` | 已有参数范围校验和 command 入口 |
-| 内存与 ZRAM | `feature.tuning.MemoryTuner` | 已有 swappiness/ZRAM 参数校验和 command 入口 |
-| FPS 监控 | `feature.telemetry.FpsMonitor` | 已有 session、采样和新遥测存储入口 |
+| CPU 调节 | `feature.tuning.CpuTuner` / `CpuTuningController` | 已有参数范围校验、执行状态和 command 入口 |
+| 内存与 ZRAM | `feature.tuning.MemoryTuner` / `MemoryTuningController` | 已有 swappiness/ZRAM 参数校验、执行状态和 command 入口 |
+| FPS 监控 | `feature.telemetry.FpsMonitor` / `FpsSessionAnalyzer` | 已有 session、采样、平均/极值/P95 frame time/jank 摘要 |
 | 新 UI | `MainActivity` | 已有 Compose 首页和六个模块入口卡片 |
 
 下一阶段按此表逐项替换内存实现：先落地持久化 schema 和测试，再接入 root/ADB/Shizuku 后端，最后实现真实设备采集。
