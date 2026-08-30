@@ -37,6 +37,8 @@ import com.scenepilot.feature.apps.ApplicationCatalog
 import com.scenepilot.feature.overview.OverviewPresenter
 import com.scenepilot.feature.scene.SceneDraft
 import com.scenepilot.feature.scene.SceneDraftStore
+import com.scenepilot.feature.tuning.CpuStatusReader
+import com.scenepilot.feature.tuning.MemoryStatusReader
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,8 +85,8 @@ private fun ModulePage(code: String, store: NewDataStore) {
         }
         "M2" -> AppListPage(store)
         "M3" -> SceneEditorPage(store)
-        "M4" -> TuningPage("CPU 调节", "CPU 意图会先校验，再交给 C0 执行。")
-        "M5" -> TuningPage("内存与 ZRAM", "ZRAM 和 swappiness 写入默认处于 dry-run。")
+        "M4" -> CpuStatusPage()
+        "M5" -> MemoryStatusPage()
         "M8" -> TuningPage("FPS 监控", "启动 session 后可记录 FPS、frame time 和 jank。")
     }
 }
@@ -131,3 +133,34 @@ private fun TuningPage(title: String, description: String) {
         Text("状态：待执行", color = MaterialTheme.colorScheme.primary)
     } }
 }
+
+@Composable
+private fun CpuStatusPage() {
+    val reader = remember { CpuStatusReader() }
+    var status by remember { mutableStateOf(reader.read()) }
+    Card(modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("CPU 调节", style = MaterialTheme.typography.titleLarge)
+        Text("在线核心：${status.onlineCores}")
+        Text("频率范围：${status.minFrequencyKHz ?: "未知"} - ${status.maxFrequencyKHz ?: "未知"} KHz")
+        Text("Governor：${status.governors.joinToString().ifEmpty { "未读取" }}")
+        Text("当前为只读模式", color = MaterialTheme.colorScheme.primary)
+        Button(onClick = { status = reader.read() }) { Text("刷新") }
+    } }
+}
+
+@Composable
+private fun MemoryStatusPage() {
+    val reader = remember { MemoryStatusReader() }
+    var status by remember { mutableStateOf(reader.read()) }
+    Card(modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("内存与 ZRAM", style = MaterialTheme.typography.titleLarge)
+        Text("总内存：${formatBytes(status.totalBytes)}")
+        Text("可用内存：${formatBytes(status.availableBytes)}")
+        Text("ZRAM 容量：${formatBytes(status.zramSizeBytes)}")
+        Text("压缩算法：${status.zramAlgorithms.joinToString().ifEmpty { "未读取" }}")
+        Text("当前为只读模式", color = MaterialTheme.colorScheme.primary)
+        Button(onClick = { status = reader.read() }) { Text("刷新") }
+    } }
+}
+
+private fun formatBytes(value: Long?): String = value?.let { "%.1f GiB".format(it / 1024.0 / 1024.0 / 1024.0) } ?: "未知"
