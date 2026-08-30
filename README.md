@@ -1,6 +1,6 @@
 # 帧域（FrameDomain）重构版
 
-这是 `scene_9.3.8.apk` 的第一版重构工程。第一版只保留已确认的核心能力：特权执行、场景调度、设备能力探测、新数据层、日志任务、全新 UI，以及设备总览、应用列表、应用场景、CPU 调节、内存/ZRAM、FPS 监控。应用显示名当前采用低冲突候选「帧域」，如需改名只需调整资源和包元数据。
+这是「帧域（FrameDomain）」的全新第一版工程。产品只实现已确认的核心能力：特权执行、场景调度、设备能力探测、新数据层、日志任务、全新 UI，以及设备总览、应用列表、应用场景、CPU 调节、内存/ZRAM、FPS 监控。实现不依赖任何旧版数据、页面或脚本格式。
 
 > 当前阶段是架构与功能骨架，所有高风险写入操作默认处于 dry-run，接入真实 root/ADB/Shizuku 后再逐项开启。
 
@@ -14,7 +14,7 @@
 ## 目录
 
 - `docs/v1-scope.md`：第一版冻结范围与验收标准。
-- `docs/apk-function-mapping.md`：APK 静态解析功能到新模块的实现映射。
+- `docs/implementation-coverage.md`：第一版能力到代码接口的实现映射。
 - `app/src/main/java/com/scenepilot/`：核心代码与 UI 骨架。
 - `CHANGELOG.md`：更新记录。
 
