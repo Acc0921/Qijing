@@ -5,7 +5,7 @@
 | 能力 | 代码入口 | 当前状态 |
 | --- | --- | --- |
 | 特权执行与 dry-run | `core.execution.ExecutionBroker` | 已有统一接口和安全默认实现 |
-| 设备能力探测 | `core.device.DeviceCapabilityProbe` | 已有 Android 基础探测器 |
+| 设备能力探测 | `core.device.DeviceCapabilityProbe` / `BackendDetector` | 只读探测 CPU、内存、ZRAM、GPU 路径及后端可用性 |
 | 场景应用事务 | `core.scene.SceneEngine` | 已将 CPU/内存意图转换为结构化 command，并写入任务日志 |
 | 全新数据层 | `core.data.NewDataStore` | 已有设备、应用、场景、遥测新模型；无迁移 API |
 | 任务与错误记录 | `core.logging.TaskLogStore` | 已有内存实现，后续替换为持久化实现 |

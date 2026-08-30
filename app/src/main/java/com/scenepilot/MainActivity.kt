@@ -77,7 +77,8 @@ private fun ModulePage(code: String, store: NewDataStore) {
                 Text("设备总览", style = MaterialTheme.typography.titleLarge)
                 overview.device?.let { Text("${it.manufacturer} ${it.model} · Android ${it.androidVersion}") }
                 Text("应用 ${overview.appCount} · 场景 ${overview.sceneCount}")
-                Text("执行后端：${ExecutionBackend.DRY_RUN.name}", color = MaterialTheme.colorScheme.primary)
+                Text("可用后端：${overview.device?.availableBackends?.joinToString { it.name } ?: ExecutionBackend.DRY_RUN.name}", color = MaterialTheme.colorScheme.primary)
+                Text("只读能力：${overview.device?.capabilities?.joinToString().ifNullOrEmpty { "未发现" }}", style = MaterialTheme.typography.bodySmall)
             } }
         }
         "M2" -> AppListPage(store)
@@ -87,6 +88,8 @@ private fun ModulePage(code: String, store: NewDataStore) {
         "M8" -> TuningPage("FPS 监控", "启动 session 后可记录 FPS、frame time 和 jank。")
     }
 }
+
+private fun String?.ifNullOrEmpty(default: () -> String): String = if (isNullOrEmpty()) default() else this
 
 @Composable
 private fun AppListPage(store: NewDataStore) {
