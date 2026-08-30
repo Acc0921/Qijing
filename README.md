@@ -8,7 +8,7 @@
 
 - Android/Kotlin，UI 使用 Jetpack Compose + Material 3，并通过自定义色彩、卡片和信息层级区别于旧版。
 - C0-C5 是平台层；M1/M2/M3/M4/M5/M8 是第一版产品模块。
-- C3 是全新数据模型，不兼容也不包装旧版 `scene_config3`。
+- C3 是全新数据模型，不提供历史数据兼容层。
 - 每次可审阅的改动都更新 `CHANGELOG.md`，提交信息保持简短。
 
 ## 目录

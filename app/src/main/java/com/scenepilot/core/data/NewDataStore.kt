@@ -5,7 +5,7 @@ import com.scenepilot.core.model.DeviceSnapshot
 import com.scenepilot.core.model.SceneProfile
 import com.scenepilot.core.model.TelemetrySample
 
-/** New schema contract. Deliberately has no scene_config3/legacy migration API. */
+/** New schema contract. Deliberately has no legacy migration API. */
 interface NewDataStore {
     fun saveDevice(snapshot: DeviceSnapshot)
     fun device(): DeviceSnapshot?
