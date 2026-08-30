@@ -20,8 +20,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.scenepilot.core.execution.DryRunExecutionBroker
+import com.scenepilot.core.data.InMemoryNewDataStore
+import com.scenepilot.core.device.AndroidDeviceCapabilityProbe
 import com.scenepilot.core.model.ExecutionBackend
+import com.scenepilot.feature.overview.OverviewPresenter
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,6 +34,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun ScenePilotApp() {
+    val overview = remember { OverviewPresenter(AndroidDeviceCapabilityProbe(), InMemoryNewDataStore()).load() }
     val modules = remember { listOf("设备总览" to "M1", "应用列表" to "M2", "应用场景" to "M3", "CPU 调节" to "M4", "内存与 ZRAM" to "M5", "FPS 监控" to "M8") }
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
@@ -44,6 +47,10 @@ private fun ScenePilotApp() {
                             Column { Text("执行后端"); Text("DRY-RUN", color = MaterialTheme.colorScheme.primary) }
                             Text(ExecutionBackend.DRY_RUN.name)
                         }
+                    }
+                    overview.device?.let { device ->
+                        Text("${device.manufacturer} ${device.model} · Android ${device.androidVersion}", modifier = Modifier.padding(top = 12.dp))
+                        Text("已发现 ${overview.appCount} 个应用 · ${overview.sceneCount} 个场景", style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 items(modules) { (name, code) ->
