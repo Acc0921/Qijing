@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.ScenePilot" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#6D5EF7</item>
+    </style>
+</resources>

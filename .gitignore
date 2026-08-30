@@ -1,0 +1,11 @@
+.gradle/
+build/
+*/build/
+local.properties
+.idea/
+*.iml
+
+# APK analysis workspace and generated reports
+work/
+outputs/
+decoded_AndroidManifest.xml
