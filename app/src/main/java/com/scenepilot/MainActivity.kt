@@ -66,6 +66,7 @@ private fun ScenePilotApp() {
     val context = LocalContext.current
     val store = remember(context) { SharedPreferencesNewDataStore(context) }
     var selected by remember { mutableStateOf("M1") }
+    var scenePackage by remember { mutableStateOf<String?>(null) }
     val modules = remember { listOf("设备总览" to "M1", "应用列表" to "M2", "应用场景" to "M3", "CPU 调节" to "M4", "内存与 ZRAM" to "M5", "FPS 监控" to "M8") }
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
@@ -79,7 +80,12 @@ private fun ScenePilotApp() {
                 items(modules) { (name, code) ->
                     Card(modifier = Modifier.fillMaxWidth().testTag("module-$code").clickable { selected = code }) { Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text(name); Text(code, color = MaterialTheme.colorScheme.primary) } }
                 }
-                item { ModulePage(selected, store) }
+                item {
+                    ModulePage(selected, store, scenePackage) { packageName ->
+                        scenePackage = packageName
+                        selected = "M3"
+                    }
+                }
             }
         }
     }
@@ -115,7 +121,7 @@ private fun SceneServiceControl() {
 }
 
 @Composable
-private fun ModulePage(code: String, store: NewDataStore) {
+private fun ModulePage(code: String, store: NewDataStore, scenePackage: String?, onCreateScene: (String) -> Unit) {
     when (code) {
         "M1" -> {
             val overview = remember { OverviewPresenter(AndroidDeviceCapabilityProbe(), store).load() }
@@ -128,8 +134,8 @@ private fun ModulePage(code: String, store: NewDataStore) {
             } }
             TaskLogCard()
         }
-        "M2" -> AppListPage(store)
-        "M3" -> SceneEditorPage(store)
+        "M2" -> AppListPage(store, onCreateScene)
+        "M3" -> SceneEditorPage(store, scenePackage)
         "M4" -> CpuStatusPage()
         "M5" -> MemoryStatusPage()
         "M8" -> FpsMonitorPage(store)
@@ -188,7 +194,7 @@ private fun FpsMonitorPage(store: NewDataStore) {
 private fun String?.ifNullOrEmpty(default: () -> String): String = if (isNullOrEmpty()) default() else this
 
 @Composable
-private fun AppListPage(store: NewDataStore) {
+private fun AppListPage(store: NewDataStore, onCreateScene: (String) -> Unit) {
     val context = LocalContext.current
     val controller = remember { AppListController(ApplicationCatalog(context), store) }
     var query by remember { mutableStateOf("") }
@@ -199,14 +205,23 @@ private fun AppListPage(store: NewDataStore) {
         OutlinedTextField(query, { query = it; state = controller.state(it, includeSystem) }, label = { Text("搜索名称或包名") }, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Switch(includeSystem, { includeSystem = it; state = controller.state(query, it) }); Text("包含系统应用") }
         Text("显示 ${state.items.size} 个应用")
-        state.items.take(8).forEach { Text("${it.label} · ${it.packageName}", style = MaterialTheme.typography.bodySmall) }
+        state.items.take(12).forEach { app ->
+            Card(modifier = Modifier.fillMaxWidth().clickable { onCreateScene(app.packageName) }) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(app.label)
+                    Text(app.packageName, style = MaterialTheme.typography.bodySmall)
+                    Text("版本 ${app.versionName.ifBlank { "未知" }} · ${if (app.isSystem) "系统应用" else "用户应用"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    Text("点击为此应用创建场景", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
     } }
 }
 
 @Composable
-private fun SceneEditorPage(store: NewDataStore) {
-    var draft by remember { mutableStateOf(SceneDraft("scene-${System.currentTimeMillis()}", "")) }
-    var packageInput by remember { mutableStateOf("") }
+private fun SceneEditorPage(store: NewDataStore, initialPackage: String?) {
+    var draft by remember(initialPackage) { mutableStateOf(SceneDraft("scene-${System.currentTimeMillis()}", "", packages = initialPackage?.let(::setOf) ?: emptySet())) }
+    var packageInput by remember(initialPackage) { mutableStateOf(initialPackage.orEmpty()) }
     var message by remember { mutableStateOf<String?>(null) }
     val sceneStore = remember(store) { SceneDraftStore(store) }
     var scenes by remember(store) { mutableStateOf(sceneStore.load()) }

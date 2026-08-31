@@ -11,7 +11,7 @@
 | 全新数据层 | `core.data.NewDataStore` / `SharedPreferencesNewDataStore` | 新 schema 版本边界、并发写入保护、损坏数据安全降级；设备、应用、场景、遥测均无旧数据迁移 API |
 | 任务与错误记录 | `core.logging.TaskLogStore` / `SharedPreferencesTaskLogStore` | 持久化并发保护，最多保留 500 条并支持损坏数据降级和重启后读取 |
 | 设备总览 | `feature.overview.OverviewPresenter` | 已有设备快照、应用数和场景数状态聚合，UI 使用持久化数据层 |
-| 应用列表 | `feature.apps.ApplicationCatalog` / `AppListController` | 已有系统应用查询、搜索和系统应用筛选 |
+| 应用列表 | `feature.apps.ApplicationCatalog` / `AppListController` | 系统应用查询、搜索和筛选；展示版本/类型，点击应用可携带包名进入场景编辑 |
 | 应用场景 | `feature.scene.SceneDraft` / `SceneDraftStore` | 已有表单校验、应用包名绑定、意图转换和持久化保存 |
 | 场景选择 | `core.scene.SceneSelector` / `SceneActivationCoordinator` | 按前台包名、启用状态和优先级选择场景，并交给事务引擎执行 |
 | 前台事件源 | `core.scene.UsageStatsForegroundAppSource` | 通过 Usage Stats 只读获取前台包名，未授权时安全降级 |
