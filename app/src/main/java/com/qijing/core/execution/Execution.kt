@@ -18,13 +18,24 @@ interface ExecutionBroker {
     suspend fun execute(command: CapabilityCommand): ExecutionResult
 }
 
+interface ExecutionBackendProvider {
+    val executionBackend: ExecutionBackend
+}
+
 /** Optional preflight contract used to reject a complete plan before the first write. */
 interface CommandValidator {
     fun validate(command: CapabilityCommand): ExecutionResult?
 }
 
+/** Marks a real write broker that must have a complete read-before-write snapshot. */
+interface RequiresRollbackSnapshot
+
 /** First-version safety default. Real backends implement this same contract later. */
-class DryRunExecutionBroker : ExecutionBroker {
+class DryRunExecutionBroker : ExecutionBroker, CommandValidator, ExecutionBackendProvider {
+    override val executionBackend: ExecutionBackend = ExecutionBackend.DRY_RUN
+    override fun validate(command: CapabilityCommand): ExecutionResult? =
+        PrivilegedWriteCommandMapper.validationResult(command, "DRY_RUN")
+
     override suspend fun execute(command: CapabilityCommand): ExecutionResult =
-        ExecutionResult.Applied(ExecutionBackend.DRY_RUN, "dry-run:${command.capability}")
+        validate(command) ?: ExecutionResult.Applied(ExecutionBackend.DRY_RUN, "dry-run:${command.capability}")
 }

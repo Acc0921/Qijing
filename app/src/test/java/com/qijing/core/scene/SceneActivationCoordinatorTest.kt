@@ -56,6 +56,18 @@ class SceneActivationCoordinatorTest {
         assertNull(coordinator.activeScene)
     }
 
+    @Test fun `disabling the active scene restores even when foreground package is unchanged`() = runBlocking {
+        val restore = RecordingRestoreExecutor()
+        val coordinator = coordinator(restore)
+        coordinator.onForeground("com.demo.game", listOf(game.copy(enabled = true)))
+
+        val result = coordinator.onForeground("com.demo.game", listOf(game.copy(enabled = false)))
+
+        assertTrue(result is SceneLifecycleResult.Restored)
+        assertNull(coordinator.activeScene)
+        assertEquals(listOf("game"), restore.calls)
+    }
+
     @Test fun `switch restores previous scene before activating next`() = runBlocking {
         val events = mutableListOf<String>()
         val restore = RecordingRestoreExecutor(events = events)

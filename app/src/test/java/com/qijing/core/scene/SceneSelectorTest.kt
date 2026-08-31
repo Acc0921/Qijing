@@ -2,6 +2,7 @@ package com.qijing.core.scene
 
 import com.qijing.core.model.SceneProfile
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SceneSelectorTest {
@@ -15,5 +16,15 @@ class SceneSelectorTest {
     @Test fun `disabled or unrelated scene is ignored`() {
         val scene = SceneProfile("off", "关闭", setOf("com.demo.game"), enabled = false)
         assertEquals(null, SceneSelector().select(listOf(scene), SceneTriggerEvent.ForegroundApp("com.demo.game")).scene)
+    }
+
+    @Test fun `equal highest priorities fail closed`() {
+        val first = SceneProfile("a", "A", setOf("com.demo.game"), priority = 50, enabled = true)
+        val second = SceneProfile("b", "B", setOf("com.demo.game"), priority = 50, enabled = true)
+
+        val result = SceneSelector().select(listOf(first, second), SceneTriggerEvent.ForegroundApp("com.demo.game"))
+
+        assertEquals(null, result.scene)
+        assertTrue(result.reason.contains("冲突"))
     }
 }

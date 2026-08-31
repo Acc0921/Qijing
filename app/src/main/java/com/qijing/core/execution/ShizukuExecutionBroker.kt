@@ -132,7 +132,8 @@ class ShizukuUserServiceTransport(
     }
 }
 
-class ShizukuExecutionBroker(private val transport: ShizukuTransport) : ExecutionBroker, CommandValidator {
+class ShizukuExecutionBroker(private val transport: ShizukuTransport) : ExecutionBroker, CommandValidator, RequiresRollbackSnapshot, ExecutionBackendProvider {
+    override val executionBackend: ExecutionBackend = ExecutionBackend.SHIZUKU
     override fun validate(command: CapabilityCommand): ExecutionResult? =
         PrivilegedWriteCommandMapper.validationResult(command, "SHIZUKU")
 

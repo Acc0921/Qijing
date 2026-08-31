@@ -2,6 +2,8 @@ package com.qijing.core.execution
 
 import com.qijing.core.model.ExecutionBackend
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Minimal transport boundary for an injectable `su -c` implementation. */
 fun interface RootTransport {
@@ -18,7 +20,7 @@ class ProcessSuTransport(
     private val suExecutable: File = File("/system/bin/su"),
     private val timeoutMs: Long = 5_000L
 ) : RootTransport {
-    override suspend fun execute(command: String): String {
+    override suspend fun execute(command: String): String = withContext(Dispatchers.IO) {
         require(command.isNotBlank()) { "Root command cannot be blank" }
         val process = try {
             ProcessBuilder(suExecutable.absolutePath, "-c", command)
@@ -49,7 +51,7 @@ class ProcessSuTransport(
                 "su exited with ${process.exitValue()}${output.takeIf(String::isNotBlank)?.let { ": $it" }.orEmpty()}"
             )
         }
-        return output
+        output
     }
 }
 
@@ -59,7 +61,8 @@ class ProcessSuTransport(
  * Every shell fragment is fixed here. Values are parsed and bounded before they can be inserted;
  * unknown arguments, unknown capabilities, and ZRAM rebuild requests never reach the transport.
  */
-class RootExecutionBroker(private val transport: RootTransport) : ExecutionBroker, CommandValidator {
+class RootExecutionBroker(private val transport: RootTransport) : ExecutionBroker, CommandValidator, RequiresRollbackSnapshot, ExecutionBackendProvider {
+    override val executionBackend: ExecutionBackend = ExecutionBackend.ROOT
     override fun validate(command: CapabilityCommand): ExecutionResult? =
         PrivilegedWriteCommandMapper.validationResult(command, "ROOT")
 

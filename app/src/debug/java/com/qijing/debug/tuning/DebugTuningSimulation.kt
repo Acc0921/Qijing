@@ -149,7 +149,7 @@ class DebugTuningExecutionBroker(
         }
     }
 
-    override fun read(capability: String): String? = store.exclusive { valueFor(store.loadValues(), capability) }
+    override suspend fun read(capability: String): String? = store.exclusive { valueFor(store.loadValues(), capability) }
 
     fun values(): DebugTuningValues = store.exclusive { store.loadValues() }
 

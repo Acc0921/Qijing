@@ -5,6 +5,8 @@ import com.qijing.core.execution.CommandPlan
 import com.qijing.core.execution.CommandValidator
 import com.qijing.core.execution.ExecutionBroker
 import com.qijing.core.execution.ExecutionResult
+import com.qijing.core.execution.ExecutionBackendProvider
+import com.qijing.core.execution.RequiresRollbackSnapshot
 import com.qijing.core.execution.TransactionResult
 import com.qijing.core.logging.TaskLog
 import com.qijing.core.logging.TaskLogStore
@@ -12,33 +14,63 @@ import com.qijing.core.model.SceneProfile
 import java.util.UUID
 
 class SceneEngine(private val broker: ExecutionBroker, private val logs: TaskLogStore, private val snapshots: SceneSnapshotManager? = null) {
-    suspend fun apply(scene: SceneProfile): TransactionResult {
+    /** Builds and validates a plan without performing any writes. */
+    suspend fun prepare(scene: SceneProfile, recordFailureLog: Boolean = true): ScenePreparation {
         val rawCommands = buildCommands(scene)
+        val backend = (broker as? ExecutionBackendProvider)?.executionBackend
         val taskId = UUID.randomUUID().toString()
         val rawPlan = CommandPlan(taskId, rawCommands)
+        if (rawCommands.isEmpty()) {
+            val failure = ExecutionResult.Failed("SCENE_NO_WRITABLE_INTENT", "场景没有可执行的调节目标，未执行任何写入")
+            recordPreparationFailure(taskId, "preflight", failure, recordFailureLog)
+            return ScenePreparation(scene, backend, rawPlan, snapshot = null, failure)
+        }
         (broker as? CommandValidator)?.let { validator ->
             rawCommands.firstNotNullOfOrNull(validator::validate)?.let { failure ->
-                logs.append(TaskLog(taskId, "preflight", failure.toString(), false, System.currentTimeMillis()))
-                return TransactionResult(rawPlan, emptyList(), failure)
+                recordPreparationFailure(taskId, "preflight", failure, recordFailureLog)
+                return ScenePreparation(scene, backend, rawPlan, snapshot = null, failure)
             }
         }
-        val commands = snapshots?.let { manager -> manager.attachRestore(rawCommands, manager.capture(rawCommands)) } ?: rawCommands
+        if (broker is RequiresRollbackSnapshot && snapshots == null) {
+            val failure = ExecutionResult.Failed("SNAPSHOT_UNAVAILABLE", "真实执行后端未提供原值读取能力，未执行任何写入")
+            recordPreparationFailure(taskId, "snapshot", failure, recordFailureLog)
+            return ScenePreparation(scene, backend, rawPlan, snapshot = null, failure)
+        }
+        val snapshot = snapshots?.capture(rawCommands)
+        val commands = if (snapshot == null) rawCommands else snapshots.attachRestore(rawCommands, snapshot)
+        val plan = CommandPlan(taskId, commands)
         if (snapshots != null && broker is CommandValidator) {
             commands.firstOrNull { it.rollback == null }?.let { missing ->
                 val failure = ExecutionResult.Failed("SNAPSHOT_INCOMPLETE", "无法读取 ${missing.capability} 的原值，未执行任何写入")
-                logs.append(TaskLog(taskId, "snapshot", failure.toString(), false, System.currentTimeMillis()))
-                return TransactionResult(CommandPlan(taskId, commands), emptyList(), failure)
+                recordPreparationFailure(taskId, "snapshot", failure, recordFailureLog)
+                return ScenePreparation(scene, backend, plan, snapshot, failure)
             }
             commands.mapNotNull { it.rollback }.firstNotNullOfOrNull(broker::validate)?.let { failure ->
-                logs.append(TaskLog(taskId, "snapshot-validation", failure.toString(), false, System.currentTimeMillis()))
-                return TransactionResult(CommandPlan(taskId, commands), emptyList(), failure)
+                recordPreparationFailure(taskId, "snapshot-validation", failure, recordFailureLog)
+                return ScenePreparation(scene, backend, plan, snapshot, failure)
             }
         }
-        val plan = CommandPlan(taskId, commands)
+        return ScenePreparation(scene, backend, plan, snapshot)
+    }
+
+    suspend fun apply(scene: SceneProfile): TransactionResult {
+        // Always prepare again at execution time so a UI preview can never supply a stale snapshot.
+        val preparation = prepare(scene, recordFailureLog = true)
+        preparation.failure?.let { return TransactionResult(preparation.plan, emptyList(), it) }
+        val plan = preparation.plan
         val appliedCommands = mutableListOf<Pair<CapabilityCommand, ExecutionResult.Applied>>()
         for (command in plan.commands) {
             val result = broker.execute(command)
-            logs.append(TaskLog(plan.id, command.capability, result.toString(), result is ExecutionResult.Applied, System.currentTimeMillis()))
+            val previewed = result is ExecutionResult.Applied && result.backend == com.qijing.core.model.ExecutionBackend.DRY_RUN
+            logs.append(
+                TaskLog(
+                    plan.id,
+                    if (previewed) "preview:${command.capability}" else command.capability,
+                    if (previewed) "预演完成，未修改系统" else result.toString(),
+                    result is ExecutionResult.Applied,
+                    System.currentTimeMillis()
+                )
+            )
             if (result is ExecutionResult.Applied) {
                 appliedCommands += command to result
                 continue
@@ -62,12 +94,23 @@ class SceneEngine(private val broker: ExecutionBroker, private val logs: TaskLog
         return TransactionResult(plan, appliedCommands.map { it.second })
     }
 
+    private fun recordPreparationFailure(
+        taskId: String,
+        stage: String,
+        failure: ExecutionResult,
+        enabled: Boolean
+    ) {
+        if (enabled) logs.append(TaskLog(taskId, stage, failure.toString(), false, System.currentTimeMillis()))
+    }
+
     private fun buildCommands(scene: SceneProfile): List<CapabilityCommand> = buildList {
         scene.cpu.governor?.let { add(CapabilityCommand("cpu.governor.set", mapOf("value" to it))) }
         scene.cpu.minFrequencyKHz?.let { add(CapabilityCommand("cpu.min_frequency.set", mapOf("khz" to it.toString()))) }
         scene.cpu.maxFrequencyKHz?.let { add(CapabilityCommand("cpu.max_frequency.set", mapOf("khz" to it.toString()))) }
+        scene.cpu.onlineCores?.let { add(CapabilityCommand("cpu.online_cores.set", mapOf("value" to it.sorted().joinToString(",")))) }
         scene.memory.zramEnabled?.let { add(CapabilityCommand("memory.zram.enabled", mapOf("value" to it.toString()))) }
         scene.memory.zramSizeBytes?.let { add(CapabilityCommand("memory.zram.size", mapOf("bytes" to it.toString()))) }
+        scene.memory.compressionAlgorithm?.let { add(CapabilityCommand("memory.zram.algorithm.set", mapOf("value" to it))) }
         scene.memory.swappiness?.let { add(CapabilityCommand("memory.swappiness.set", mapOf("value" to it.toString()))) }
     }
 }

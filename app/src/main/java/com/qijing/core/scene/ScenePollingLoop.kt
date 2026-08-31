@@ -6,8 +6,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Lifecycle-friendly event loop. It emits only when the foreground package changes;
- * the host decides whether to call SceneActivationCoordinator.
+ * Lifecycle-friendly event loop. Every successful sample is emitted so the host can also
+ * reconcile scene enable/disable changes while the foreground package stays the same.
  */
 class ScenePollingLoop(
     private val source: ForegroundAppSource,
@@ -47,6 +47,7 @@ class ScenePollingLoop(
             }
             return
         }
-        if (current != lastPackage) { lastPackage = current; onPackageChanged(current) }
+        lastPackage = current
+        onPackageChanged(current)
     }
 }
