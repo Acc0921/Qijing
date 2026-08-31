@@ -1,5 +1,6 @@
 package com.scenepilot.feature.tuning
 
+import com.scenepilot.core.scene.CapabilityValueReader
 import java.io.File
 
 data class CpuStatus(val onlineCores: Int, val governors: Set<String>, val minFrequencyKHz: Long?, val maxFrequencyKHz: Long?)
@@ -22,6 +23,15 @@ class MemoryStatusReader(private val memInfo: File = File("/proc/meminfo"), priv
         }.toMap()
         val algorithms = zram.resolve("comp_algorithm").readTextOrNull()?.split(Regex("\\s+"))?.filter { it.isNotBlank() && !it.startsWith("[") }?.toSet() ?: emptySet()
         return MemoryStatus(values["MemTotal"], values["MemAvailable"], zram.resolve("disksize").readLongOrNull(), algorithms)
+    }
+}
+
+class SysfsCapabilityValueReader : CapabilityValueReader {
+    override fun read(capability: String): String? = when (capability) {
+        "cpu.governor.set" -> File("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor").readTextOrNull()?.trim()
+        "memory.swappiness.set" -> File("/proc/sys/vm/swappiness").readTextOrNull()?.trim()
+        "memory.zram.size" -> File("/sys/block/zram0/disksize").readLongOrNull()?.toString()
+        else -> null
     }
 }
 

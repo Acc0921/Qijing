@@ -10,9 +10,11 @@ import com.scenepilot.core.logging.TaskLogStore
 import com.scenepilot.core.model.SceneProfile
 import java.util.UUID
 
-class SceneEngine(private val broker: ExecutionBroker, private val logs: TaskLogStore) {
+class SceneEngine(private val broker: ExecutionBroker, private val logs: TaskLogStore, private val snapshots: SceneSnapshotManager? = null) {
     suspend fun apply(scene: SceneProfile): TransactionResult {
-        val plan = CommandPlan(UUID.randomUUID().toString(), buildCommands(scene))
+        val rawCommands = buildCommands(scene)
+        val commands = snapshots?.let { manager -> manager.attachRestore(rawCommands, manager.capture(rawCommands)) } ?: rawCommands
+        val plan = CommandPlan(UUID.randomUUID().toString(), commands)
         val appliedCommands = mutableListOf<Pair<CapabilityCommand, ExecutionResult.Applied>>()
         for (command in plan.commands) {
             val result = broker.execute(command)
