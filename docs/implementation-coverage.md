@@ -25,7 +25,7 @@
 | 内存与 ZRAM 手动调节 | `ui.TuningScreen` / `feature.tuning.MemoryTuner` | 已有内存/ZRAM 只读状态及 swappiness 的范围校验、预览、快照、确认、读回和恢复链路；ZRAM 重建继续关闭，swappiness 真机真实写尚未执行 |
 | FPS 当前窗口采集 | `feature.telemetry.WindowFpsCollector` / `FpsMonitor` / `ui.MonitorScreen` | Android 7+ 使用 FrameMetrics 按 1 秒窗口聚合并持久化；API 35 设备测试通过，API 23 明确显示不支持；仍不代表外部应用 FPS |
 | FPS 分析与导出 | `feature.telemetry.FpsSessionAnalyzer` / `FpsCsvExporter` | 支持平均/极值/P95/jank、历史列表、摘要回看和 CSV 系统分享；外部应用采集不在当前实现内 |
-| 五栏 UI | `MainActivity` / `ui.QijingApp` | 总览、应用、场景、调节、监控五栏以及亮/暗主题和专属组件已接入；完整设备套件已在 API 23 与 API 35 运行，8 项通过，Root-only 用例按模拟器条件跳过，不再是“仅编译”状态 |
+| 五栏 UI | `MainActivity` / `ui.QijingApp` | 五页已统一为 edge-to-edge、紧凑 Top App Bar、原生底部导航、分组列表与 Bottom Sheet；Hero/卡片流已退出普通信息层，场景链路、预演和会话图表继续使用专属边界；亮暗主题与 API 23/35 回归状态见已验证边界 |
 
 ## 已验证边界
 

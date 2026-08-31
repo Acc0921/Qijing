@@ -1,10 +1,12 @@
 package com.qijing.ui
 
 import androidx.compose.animation.Crossfade
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.AutoAwesomeMotion
@@ -23,8 +25,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -43,61 +45,55 @@ private enum class MainDestination(val code: String, val label: String, val icon
 fun QijingApp() {
     val context = LocalContext.current
     val store = remember(context) { SharedPreferencesNewDataStore(context) }
-    var destination by remember { mutableStateOf(MainDestination.Overview) }
+    var destinationName by rememberSaveable { mutableStateOf(MainDestination.Overview.name) }
+    val destination = MainDestination.entries.firstOrNull { it.name == destinationName } ?: MainDestination.Overview
     var sceneApp by remember { mutableStateOf<AppEntry?>(null) }
 
-    Box(
-        Modifier.fillMaxSize().background(
-            Brush.verticalGradient(
-                0f to MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
-                0.24f to MaterialTheme.colorScheme.background,
-                1f to MaterialTheme.colorScheme.background
-            )
-        )
-    ) {
-        Scaffold(
-            containerColor = androidx.compose.ui.graphics.Color.Transparent,
-            bottomBar = {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f)) {
-                    MainDestination.entries.forEach { item ->
-                        NavigationBarItem(
-                            modifier = Modifier.testTag("module-${item.code}"),
-                            selected = destination == item,
-                            onClick = { destination = item },
-                            icon = { Icon(item.icon, contentDescription = item.label) },
-                            label = { Text(item.label) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                                selectedTextColor = MaterialTheme.colorScheme.primary,
-                                indicatorColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.72f),
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                                unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background,
+        // Every primary screen owns a TopAppBar, which already consumes the status-bar inset.
+        contentWindowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal),
+        bottomBar = {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                MainDestination.entries.forEach { item ->
+                    NavigationBarItem(
+                        modifier = Modifier.testTag("module-${item.code}"),
+                        selected = destination == item,
+                        onClick = { destinationName = item.name },
+                        icon = { Icon(item.icon, contentDescription = item.label) },
+                        label = { Text(item.label) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            selectedTextColor = MaterialTheme.colorScheme.primary,
+                            indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    }
+                    )
                 }
             }
-        ) { padding ->
-            Crossfade(destination, label = "main-destination", modifier = Modifier.fillMaxSize().padding(padding)) { current ->
-                when (current) {
-                    MainDestination.Overview -> OverviewScreen(
-                        store = store,
-                        onOpenScenes = { destination = MainDestination.Scenes },
-                        onOpenTuning = { destination = MainDestination.Tuning }
-                    )
-                    MainDestination.Apps -> AppsScreen(store) { app ->
-                        sceneApp = app
-                        destination = MainDestination.Scenes
-                    }
-                    MainDestination.Scenes -> ScenesScreen(
-                        store = store,
-                        initialApp = sceneApp,
-                        onAppConsumed = { sceneApp = null },
-                        onChooseApp = { destination = MainDestination.Apps }
-                    )
-                    MainDestination.Tuning -> TuningScreen()
-                    MainDestination.Monitor -> MonitorScreen(store)
+        }
+    ) { padding ->
+        Crossfade(destination, label = "main-destination", modifier = Modifier.fillMaxSize().padding(padding)) { current ->
+            when (current) {
+                MainDestination.Overview -> OverviewScreen(
+                    store = store,
+                    onOpenScenes = { destinationName = MainDestination.Scenes.name },
+                    onOpenTuning = { destinationName = MainDestination.Tuning.name }
+                )
+                MainDestination.Apps -> AppsScreen(store) { app ->
+                    sceneApp = app
+                    destinationName = MainDestination.Scenes.name
                 }
+                MainDestination.Scenes -> ScenesScreen(
+                    store = store,
+                    initialApp = sceneApp,
+                    onAppConsumed = { sceneApp = null },
+                    onChooseApp = { destinationName = MainDestination.Apps.name }
+                )
+                MainDestination.Tuning -> TuningScreen()
+                MainDestination.Monitor -> MonitorScreen(store)
             }
         }
     }

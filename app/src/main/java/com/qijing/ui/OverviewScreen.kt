@@ -2,8 +2,10 @@ package com.qijing.ui
 
 import android.content.Intent
 import android.provider.Settings
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,17 +13,26 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.AutoAwesomeMotion
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.PhoneAndroid
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -32,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -41,15 +53,16 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.qijing.core.data.NewDataStore
 import com.qijing.core.device.AndroidDeviceCapabilityProbe
+import com.qijing.core.device.BackendAvailability
 import com.qijing.core.device.LocalBackendDetector
 import com.qijing.core.execution.BackendPreference
 import com.qijing.core.execution.BackendSelectionResult
 import com.qijing.core.execution.ShizukuRuntime
 import com.qijing.core.logging.SharedPreferencesTaskLogStore
 import com.qijing.core.model.ExecutionBackend
-import com.qijing.core.scene.SceneTriggerService
 import com.qijing.core.scene.SceneServicePhase
 import com.qijing.core.scene.SceneServiceStateStore
+import com.qijing.core.scene.SceneTriggerService
 import com.qijing.core.scene.UsageStatsForegroundAppSource
 import com.qijing.feature.overview.OverviewPresenter
 import java.text.SimpleDateFormat
@@ -62,61 +75,88 @@ internal fun OverviewScreen(store: NewDataStore, onOpenScenes: () -> Unit, onOpe
     val overview = remember(store) { OverviewPresenter(AndroidDeviceCapabilityProbe(), store).load() }
     val logsStore = remember(context) { SharedPreferencesTaskLogStore(context) }
     var logs by remember { mutableStateOf(logsStore.recent(4)) }
+    val device = overview.device
 
     LazyColumn(
         modifier = Modifier.testTag("home"),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
         item {
-            ScreenHeader(
-                eyebrow = "QIJING CONTROL",
-                title = "晚上好，设备已就绪",
-                summary = "先看状态，再决定是否调节。所有特权操作都有快照与回滚边界。"
+            QijingTopAppBar(
+                title = "栖境",
+                actions = {
+                    IconButton(onClick = { logs = logsStore.recent(4) }) {
+                        Icon(Icons.Rounded.History, "刷新任务记录")
+                    }
+                }
             )
         }
+
+        item { AutomationControlSection() }
+
+        item { OverviewPageSection("当前设备") }
         item {
-            QijingHero {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(overview.device?.model ?: "设备信息读取中", style = MaterialTheme.typography.headlineLarge)
-                        Text(
-                            listOfNotNull(overview.device?.manufacturer, overview.device?.soc, overview.device?.androidVersion?.let { "Android $it" }).joinToString(" · "),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    }
-                    StatusBadge(if (overview.lastError == null) "状态正常" else "读取受限", if (overview.lastError == null) BadgeTone.Good else BadgeTone.Warning)
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    MetricTile("应用", overview.appCount.toString(), "已建立索引", Modifier.weight(1f), QijingBlue)
-                    MetricTile("场景", overview.sceneCount.toString(), "自动化规则", Modifier.weight(1f), QijingMint)
-                    MetricTile("能力", overview.device?.capabilities?.size?.toString() ?: "—", "只读探测", Modifier.weight(1f), QijingAmber)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = onOpenTuning) { Text("打开调节中心"); Icon(Icons.AutoMirrored.Rounded.ArrowForward, null, Modifier.padding(start = 6.dp)) }
-                    FilledTonalButton(onClick = onOpenScenes) { Text("管理场景") }
-                }
+            OverviewNativeGroup {
+                OverviewStatusRow(
+                    icon = Icons.Rounded.PhoneAndroid,
+                    title = device?.model ?: "设备信息读取中",
+                    detail = listOfNotNull(device?.manufacturer, device?.androidVersion?.let { "Android $it" }).joinToString(" · ").ifBlank { "等待设备状态" },
+                    trailing = device?.soc ?: "—"
+                )
+                OverviewDivider()
+                OverviewStatusRow(
+                    icon = Icons.Rounded.Tune,
+                    title = "CPU",
+                    detail = "查看设备支持范围并进行安全预演",
+                    trailing = "只读",
+                    onClick = onOpenTuning
+                )
+                OverviewDivider()
+                OverviewStatusRow(
+                    icon = Icons.Rounded.Security,
+                    title = "内存与 ZRAM",
+                    detail = "ZRAM 仅展示状态，不开放重建",
+                    trailing = if (device?.capabilities?.isNotEmpty() == true) "正常" else "读取受限",
+                    onClick = onOpenTuning
+                )
             }
         }
-        item { AutomationControlCard() }
+
+        item { OverviewPageSection("应用与场景") }
         item {
-            QijingPanel {
-                SectionHeader("最近执行", "只展示最近 4 条任务结果") {
-                    IconButton(onClick = { logs = logsStore.recent(4) }) { Icon(Icons.Rounded.History, "刷新任务记录") }
-                }
+            OverviewNativeGroup {
+                OverviewStatusRow(Icons.Rounded.Apps, "应用索引", "用于选择自动化触发对象", "${overview.appCount} 个")
+                OverviewDivider()
+                OverviewStatusRow(Icons.Rounded.AutoAwesomeMotion, "场景", "启用只表示等待命中", "${overview.sceneCount} 个", onOpenScenes)
+            }
+        }
+
+        item {
+            OverviewPageSection("最近执行") {
+                IconButton(onClick = { logs = logsStore.recent(4) }) { Icon(Icons.Rounded.History, "刷新任务记录") }
+            }
+        }
+        item {
+            OverviewNativeGroup {
                 if (logs.isEmpty()) {
-                    EmptyState("还没有执行记录", "启动自动化并命中场景后，执行与回滚结果会出现在这里。")
+                    ListItem(
+                        headlineContent = { Text("还没有执行记录") },
+                        supportingContent = { Text("命中场景后的预检、执行与恢复结果会显示在这里。") },
+                        colors = nativeListColors()
+                    )
                 } else {
-                    logs.asReversed().forEach { log ->
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            StatusBadge(if (log.success) "成功" else "异常", if (log.success) BadgeTone.Good else BadgeTone.Danger)
-                            Column(Modifier.weight(1f)) {
-                                Text(log.stage, style = MaterialTheme.typography.titleMedium)
-                                Text(log.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
-                            }
-                            Text(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(log.timestampMs)), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                    logs.asReversed().forEachIndexed { index, log ->
+                        ListItem(
+                            headlineContent = { Text(log.stage, maxLines = 1) },
+                            supportingContent = { Text(log.message, maxLines = 2) },
+                            leadingContent = { StatusBadge(if (log.success) "成功" else "异常", if (log.success) BadgeTone.Good else BadgeTone.Danger) },
+                            trailingContent = {
+                                Text(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(log.timestampMs)), style = MaterialTheme.typography.labelMedium)
+                            },
+                            colors = nativeListColors()
+                        )
+                        if (index != logs.lastIndex) OverviewDivider()
                     }
                 }
             }
@@ -125,8 +165,9 @@ internal fun OverviewScreen(store: NewDataStore, onOpenScenes: () -> Unit, onOpe
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AutomationControlCard() {
+private fun AutomationControlSection() {
     val context = LocalContext.current
     val source = remember(context) { UsageStatsForegroundAppSource(context) }
     val preference = remember(context) { BackendPreference(context) }
@@ -137,6 +178,7 @@ private fun AutomationControlCard() {
     var availability by remember { mutableStateOf(LocalBackendDetector().detect()) }
     var serviceState by remember { mutableStateOf(serviceStateStore.current()) }
     var backendMessage by remember { mutableStateOf<String?>(null) }
+    var showBackendSheet by remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -144,6 +186,7 @@ private fun AutomationControlCard() {
                 access = source.accessState()
                 availability = LocalBackendDetector().detect()
                 serviceState = serviceStateStore.current()
+                selectedBackend = preference.selected()
             }
         }
         val observation = serviceStateStore.observe { serviceState = it }
@@ -156,88 +199,216 @@ private fun AutomationControlCard() {
 
     val backendReady = selectedBackend == ExecutionBackend.DRY_RUN || availability.firstOrNull { it.backend == selectedBackend }?.available == true
     val backendLocked = serviceState.phase != SceneServicePhase.STOPPED
-    QijingPanel(elevated = true) {
-        SectionHeader("自动化引擎", "按前台应用匹配场景；离场或停止时恢复原值") {
-            val (label, tone) = when (serviceState.phase) {
-                SceneServicePhase.RUNNING -> "运行中" to BadgeTone.Good
-                SceneServicePhase.STOPPING -> "恢复中" to BadgeTone.Warning
-                SceneServicePhase.RECOVERY_REQUIRED -> "恢复未确认" to BadgeTone.Danger
-                SceneServicePhase.STOPPED -> "未启动" to BadgeTone.Neutral
-            }
-            StatusBadge(label, tone)
+    val summaryTitle: String
+    val summaryDetail: String
+    val summaryValue: String
+    val summaryTone: BadgeTone
+    when {
+        serviceState.phase == SceneServicePhase.RECOVERY_REQUIRED -> {
+            summaryTitle = "恢复任务需要处理"
+            summaryDetail = serviceState.detail.ifBlank { "上次恢复结果未确认，真实操作已锁定" }
+            summaryValue = "查看任务"
+            summaryTone = BadgeTone.Danger
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(ExecutionBackend.DRY_RUN, ExecutionBackend.ROOT, ExecutionBackend.SHIZUKU).forEach { backend ->
-                val available = backend == ExecutionBackend.DRY_RUN || availability.firstOrNull { it.backend == backend }?.available == true
-                FilterChip(
-                    selected = selectedBackend == backend,
-                    onClick = {
-                        when (preference.select(backend)) {
-                            BackendSelectionResult.SELECTED -> {
-                                selectedBackend = backend
-                                backendMessage = "已选择执行方式；已有启用场景已停用，需要重新预演。"
-                            }
-                            BackendSelectionResult.UNCHANGED -> backendMessage = null
-                            BackendSelectionResult.BLOCKED_SERVICE_ACTIVE -> backendMessage = "自动化尚未安全停止，当前不能切换执行方式。"
-                        }
-                    },
-                    enabled = !backendLocked && available,
-                    label = { Text(when (backend) { ExecutionBackend.DRY_RUN -> "预览"; ExecutionBackend.ROOT -> "Root"; else -> "Shizuku" }) },
-                    leadingIcon = if (selectedBackend == backend) ({ Icon(Icons.Rounded.Check, null) }) else null
-                )
-            }
+        !access.granted -> {
+            summaryTitle = "自动化尚未就绪"
+            summaryDetail = "还缺少前台应用访问权限"
+            summaryValue = "去授权"
+            summaryTone = BadgeTone.Warning
         }
-        Text(
-            "执行方式是全局环境；切换会停用已启用场景，并要求重新运行安全预演。",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+        !backendReady -> {
+            summaryTitle = "执行方式不可用"
+            summaryDetail = "请重新选择当前设备可用的执行方式"
+            summaryValue = "选择方式"
+            summaryTone = BadgeTone.Warning
+        }
+        serviceState.phase == SceneServicePhase.RUNNING -> {
+            summaryTitle = "自动化运行中"
+            summaryDetail = "命中场景时会按预演、验证和恢复闭环执行"
+            summaryValue = selectedBackend.displayLabel()
+            summaryTone = BadgeTone.Good
+        }
+        else -> {
+            summaryTitle = "设备已就绪"
+            summaryDetail = "权限与执行方式可用，可以启动自动化"
+            summaryValue = selectedBackend.displayLabel()
+            summaryTone = BadgeTone.Good
+        }
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        QijingStatusSummary(
+            title = summaryTitle,
+            value = summaryValue,
+            detail = summaryDetail,
+            tone = summaryTone,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
-        backendMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
-        if (serviceState.phase != SceneServicePhase.STOPPED) {
-            Text(
-                serviceState.detail.ifBlank { "自动化状态正在更新" },
-                style = MaterialTheme.typography.bodySmall,
-                color = if (serviceState.phase == SceneServicePhase.RECOVERY_REQUIRED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Icon(Icons.Rounded.Security, null, tint = if (access.granted) QijingMint else QijingAmber)
-            Column(Modifier.weight(1f)) {
-                Text(if (access.granted) "前台应用访问已授权" else "需要前台应用访问权限", style = MaterialTheme.typography.titleMedium)
+        OverviewPageSection("自动化")
+        OverviewNativeGroup {
+        OverviewStatusRow(
+            icon = Icons.Rounded.Tune,
+            title = "执行方式",
+            detail = if (backendLocked) "自动化运行期间已锁定" else "切换后所有已启用场景会停用",
+            trailing = selectedBackend.displayLabel(),
+            onClick = { showBackendSheet = true }
+        )
+        OverviewDivider()
+        ListItem(
+            headlineContent = { Text(if (access.granted) "前台应用访问已授权" else "需要前台应用访问权限") },
+            supportingContent = { Text(if (access.granted) "只用于判断当前前台应用，不读取屏幕内容。" else "授权返回后会自动刷新状态。") },
+            leadingContent = { Icon(Icons.Rounded.Security, null, tint = if (access.granted) QijingMint else QijingAmber) },
+            trailingContent = {
+                if (access.granted) StatusBadge("已授权", BadgeTone.Good)
+                else TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) { Text("去授权") }
+            },
+            colors = nativeListColors()
+        )
+        OverviewDivider()
+        ListItem(
+            headlineContent = { Text("场景自动化") },
+            supportingContent = {
                 Text(
                     when {
-                        !access.granted -> "用于判断当前应用，不读取屏幕内容。"
-                        selectedBackend == ExecutionBackend.ROOT && backendReady -> "Root 可用；写入前会读取快照，失败自动回滚。"
+                        serviceState.phase == SceneServicePhase.RECOVERY_REQUIRED -> serviceState.detail.ifBlank { "上次恢复未确认，请先处理。" }
+                        selectedBackend == ExecutionBackend.ROOT && backendReady -> "Root 可用；每次写入前读取快照。"
                         selectedBackend == ExecutionBackend.SHIZUKU -> ShizukuRuntime.status().detail
                         else -> "预览模式只记录计划，不修改系统。"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    }
                 )
-            }
-            if (!access.granted) TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) { Text("去授权") }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(
-                modifier = Modifier.testTag("service-toggle"),
-                enabled = serviceState.phase == SceneServicePhase.RUNNING ||
-                    (serviceState.phase == SceneServicePhase.STOPPED && access.granted && backendReady),
-                onClick = {
-                    val intent = Intent(context, SceneTriggerService::class.java)
-                    if (serviceState.phase == SceneServicePhase.RUNNING) {
-                        intent.action = SceneTriggerService.ACTION_STOP
-                        context.startService(intent)
-                    } else ContextCompat.startForegroundService(context, intent)
+            },
+            leadingContent = { Icon(if (serviceState.phase == SceneServicePhase.RUNNING) Icons.Rounded.Stop else Icons.Rounded.PlayArrow, null) },
+            trailingContent = {
+                Button(
+                    modifier = Modifier.testTag("service-toggle"),
+                    enabled = serviceState.phase == SceneServicePhase.RUNNING ||
+                        (serviceState.phase == SceneServicePhase.STOPPED && access.granted && backendReady),
+                    onClick = {
+                        val intent = Intent(context, SceneTriggerService::class.java)
+                        if (serviceState.phase == SceneServicePhase.RUNNING) {
+                            intent.action = SceneTriggerService.ACTION_STOP
+                            context.startService(intent)
+                        } else ContextCompat.startForegroundService(context, intent)
+                    }
+                ) {
+                    Text(if (serviceState.phase == SceneServicePhase.RUNNING) "停止" else "启动")
                 }
-            ) {
-                Text(when (serviceState.phase) {
-                    SceneServicePhase.RUNNING -> "停止并恢复"
-                    SceneServicePhase.STOPPING -> "正在恢复"
-                    SceneServicePhase.RECOVERY_REQUIRED -> "需要处理恢复"
-                    SceneServicePhase.STOPPED -> "启动自动化"
-                })
+            },
+            colors = nativeListColors()
+        )
+        backendMessage?.let {
+            OverviewDivider()
+            Text(it, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+        }
+        }
+    }
+
+    if (showBackendSheet) {
+        ModalBottomSheet(onDismissRequest = { showBackendSheet = false }) {
+            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                Text("选择执行方式", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+                Text(
+                    "执行方式是全局安全环境。自动化未停止时不可切换；切换会停用已启用场景。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)
+                )
+                listOf(ExecutionBackend.DRY_RUN, ExecutionBackend.ROOT, ExecutionBackend.SHIZUKU).forEach { backend ->
+                    val status = availability.firstOrNull { it.backend == backend }
+                    val available = backend == ExecutionBackend.DRY_RUN || status?.available == true
+                    BackendSheetRow(
+                        backend = backend,
+                        availability = status,
+                        selected = selectedBackend == backend,
+                        enabled = !backendLocked && available,
+                        onClick = {
+                            when (preference.select(backend)) {
+                                BackendSelectionResult.SELECTED -> {
+                                    selectedBackend = backend
+                                    backendMessage = "已选择执行方式；已有启用场景已停用，需要重新预演。"
+                                    showBackendSheet = false
+                                }
+                                BackendSelectionResult.UNCHANGED -> showBackendSheet = false
+                                BackendSelectionResult.BLOCKED_SERVICE_ACTIVE -> backendMessage = "自动化尚未安全停止，当前不能切换执行方式。"
+                            }
+                        }
+                    )
+                }
+                val shizuku = ShizukuRuntime.status()
+                if (!shizuku.ready) {
+                    TextButton(
+                        onClick = {
+                            ShizukuRuntime.requestPermission()
+                            backendMessage = "已请求 Shizuku 授权；返回应用后会刷新状态。"
+                            showBackendSheet = false
+                        },
+                        modifier = Modifier.padding(horizontal = 12.dp)
+                    ) { Text("请求 Shizuku 授权") }
+                }
             }
-            OutlinedButton(onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) { Text("权限设置") }
         }
     }
 }
+
+@Composable
+private fun BackendSheetRow(
+    backend: ExecutionBackend,
+    availability: BackendAvailability?,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    ListItem(
+        modifier = Modifier.clickable(enabled = enabled, onClick = onClick),
+        headlineContent = { Text(backend.displayLabel()) },
+        supportingContent = {
+            Text(
+                when (backend) {
+                    ExecutionBackend.DRY_RUN -> "只验证计划并记录预演，不修改系统"
+                    else -> availability?.reason ?: if (availability?.available == true) "后端已就绪" else "当前不可用"
+                }
+            )
+        },
+        leadingContent = { Icon(if (backend == ExecutionBackend.DRY_RUN) Icons.Rounded.Security else Icons.Rounded.Settings, null) },
+        trailingContent = { if (selected) Icon(Icons.Rounded.Check, "当前执行方式", tint = MaterialTheme.colorScheme.primary) },
+        colors = nativeListColors()
+    )
+}
+
+@Composable
+private fun OverviewNativeGroup(content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth(), content = content)
+}
+
+@Composable
+private fun OverviewPageSection(title: String, action: (@Composable () -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        action?.invoke()
+    }
+}
+
+@Composable
+private fun OverviewStatusRow(icon: ImageVector, title: String, detail: String, trailing: String, onClick: (() -> Unit)? = null) {
+    ListItem(
+        modifier = if (onClick == null) Modifier else Modifier.clickable(onClick = onClick),
+        headlineContent = { Text(title) },
+        supportingContent = { Text(detail, maxLines = 2) },
+        leadingContent = { Icon(icon, null) },
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(trailing, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (onClick != null) Icon(Icons.Rounded.ChevronRight, null)
+            }
+        },
+        colors = nativeListColors()
+    )
+}
+
+@Composable
+private fun OverviewDivider() {
+    HorizontalDivider(modifier = Modifier.padding(start = 56.dp), color = MaterialTheme.colorScheme.outlineVariant)
+}
+
+@Composable
+private fun nativeListColors() = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent)

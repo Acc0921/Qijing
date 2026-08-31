@@ -5,8 +5,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -14,12 +16,13 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -69,6 +72,7 @@ private const val INTENT_SYSTEM = "system"
 private const val INTENT_RESPONSIVE = "responsive"
 private const val INTENT_CUSTOM = "custom"
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ScenesScreen(
     store: NewDataStore,
@@ -123,18 +127,22 @@ internal fun ScenesScreen(
     val samePriority = overlapping.filter { it.priority == draft.priority }
     androidx.compose.foundation.lazy.LazyColumn(
         modifier = Modifier.testTag("scene-list"),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = PaddingValues(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
         item {
-            ScreenHeader(
-                eyebrow = "SCENE CHAIN",
-                title = if (editorOpen) "场景链路工作台" else "自动调节关系",
-                summary = if (editorOpen) "应用 → 意图 → 优先级 → 预演 → 启用 → 命中 → 恢复" else "启用只表示等待命中；写入并读回一致后才算生效。",
-                action = {
-                    FilledTonalButton(onClick = onChooseApp) {
-                        Icon(if (editorOpen) Icons.AutoMirrored.Rounded.ArrowBack else Icons.Rounded.Add, null)
-                        Text(if (editorOpen) "换应用" else "建立场景")
+            QijingTopAppBar(
+                title = if (editorOpen) "编辑场景" else "场景",
+                navigationIcon = {
+                    if (editorOpen) {
+                        IconButton(onClick = { editorOpen = false; invalidatePreparation() }) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回场景列表")
+                        }
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onChooseApp) {
+                        Icon(Icons.Rounded.Add, if (editorOpen) "更换应用" else "新建场景")
                     }
                 }
             )
@@ -142,7 +150,7 @@ internal fun ScenesScreen(
 
         if (editorOpen) {
             item {
-                QijingPanel(elevated = true, modifier = Modifier.testTag("scene-editor")) {
+                QijingPanel(elevated = true, modifier = Modifier.padding(16.dp).testTag("scene-editor")) {
                     val app = targetApp
                     if (app == null) {
                         EmptyState("先选择一个应用", "从应用栏选择触发对象，栖境会把它带入完整链路。")
@@ -170,8 +178,8 @@ internal fun ScenesScreen(
 
             if (targetApp != null) {
                 item {
-                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SectionHeader("选择调节意图", "只描述调度倾向，不承诺性能或功耗收益")
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        PageSectionHeader("选择调节意图", "只描述调度倾向，不承诺性能或功耗收益")
                         IntentTrack(
                             options = intentOptions(governors),
                             selectedId = selectedIntent,
@@ -183,7 +191,7 @@ internal fun ScenesScreen(
                     }
                 }
                 item {
-                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         PriorityTrack(draft.priority, overlapping.size, onValueChange = { value ->
                             draft = draft.copy(priority = value, enabled = false)
                             invalidatePreparation()
@@ -199,7 +207,7 @@ internal fun ScenesScreen(
                 }
                 preparation?.let { report ->
                     item {
-                        QijingPanel(elevated = true, modifier = Modifier.testTag("scene-preview")) {
+                        QijingPanel(elevated = true, modifier = Modifier.padding(16.dp).testTag("scene-preview")) {
                             RehearsalReport(
                                 preparation = report,
                                 backend = backend,
@@ -209,7 +217,7 @@ internal fun ScenesScreen(
                     }
                 }
                 item {
-                    QijingPanel {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         message?.let {
                             Text(
                                 it,
@@ -217,8 +225,7 @@ internal fun ScenesScreen(
                                 color = if (messageError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                             )
                         }
-                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlinedButton(
+                        OutlinedButton(
                                 modifier = Modifier.fillMaxWidth().testTag("scene-save"),
                                 onClick = {
                                     val errors = sceneStore.save(draft.copy(enabled = false))
@@ -232,7 +239,7 @@ internal fun ScenesScreen(
                                     }
                                 }
                             ) { Text("保存但不启用") }
-                            Button(
+                        Button(
                                 modifier = Modifier.fillMaxWidth().testTag("scene-rehearse"),
                                 enabled = !preparing,
                                 onClick = {
@@ -276,7 +283,6 @@ internal fun ScenesScreen(
                                     }
                                 }
                             ) { Text(if (preparing) "预演中…" else "运行安全预演") }
-                        }
                         preparation?.takeIf { it.ready && it.plan.commands.isNotEmpty() }?.let {
                             Button(
                                 modifier = Modifier.fillMaxWidth().testTag("scene-enable"),
@@ -297,26 +303,22 @@ internal fun ScenesScreen(
                                 Text(if (backend == ExecutionBackend.DRY_RUN) "启用预览场景" else "继续启用真实自动调节")
                             }
                         }
-                        TextButton(onClick = { editorOpen = false; invalidatePreparation() }) { Text("返回场景列表") }
+                        TextButton(modifier = Modifier.fillMaxWidth(), onClick = { editorOpen = false; invalidatePreparation() }) { Text("返回场景列表") }
                     }
                 }
             }
         } else {
             item {
-                QijingPanel(elevated = true) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Icon(Icons.Rounded.Security, null, tint = QijingMint)
-                        Column(Modifier.weight(1f)) {
-                            Text("自动调节安全边界", style = MaterialTheme.typography.titleMedium)
-                            Text("每次命中重新快照；离场、切换或停止服务时恢复。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        StatusBadge(backend.displayLabel(), if (backend == ExecutionBackend.DRY_RUN) BadgeTone.Info else BadgeTone.Warning)
-                    }
-                }
+                NativeListRow(
+                    title = "自动调节安全边界",
+                    supporting = "命中时重新快照；离场、切换或停止服务时恢复",
+                    status = backend.displayLabel(),
+                    leading = { Icon(Icons.Rounded.Security, null, tint = if (backend == ExecutionBackend.DRY_RUN) QijingBlue else QijingAmber) }
+                )
             }
-            item { SectionHeader("已保存场景", if (scenes.isEmpty()) "从一个应用开始建立关系" else "${scenes.size} 个场景") }
+            item { PageSectionHeader("已保存场景", if (scenes.isEmpty()) "从一个应用开始建立关系" else "${scenes.size} 个场景", Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
             if (scenes.isEmpty()) {
-                item { EmptyState("还没有场景", "从应用栏选择目标应用，建立第一条安全调节链路。") }
+                item { EmptyState("还没有场景", "从应用栏选择目标应用，建立第一条安全调节链路。", Modifier.padding(horizontal = 16.dp)) }
             } else {
                 items(scenes.size, key = { scenes[it].id }) { index ->
                     val scene = scenes[index]
@@ -432,17 +434,13 @@ private fun SceneCard(
     onEnabledChange: (Boolean) -> Unit,
     onEdit: () -> Unit
 ) {
-    QijingPanel(modifier = Modifier.testTag("scene-card-${scene.id}")) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(scene.name, style = MaterialTheme.typography.titleLarge)
-                Text(appLabel, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                Text(
-                    if (scene.enabled) "已启用 · 等待命中" else "已保存 · 未启用",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+    Column(Modifier.fillMaxWidth().testTag("scene-card-${scene.id}")) {
+        NativeListRow(
+            title = scene.name,
+            supporting = "$appLabel · ${intentLabel(scene)} · 优先级 ${scene.priority}\n${if (scene.enabled) "已启用，等待命中；命中不等于已写入" else "已保存，启用前需重新预演"}",
+            onClick = onEdit,
+            leading = { Icon(Icons.Rounded.Edit, null, tint = MaterialTheme.colorScheme.primary) },
+            trailing = {
             Switch(
                 modifier = Modifier.testTag("scene-enabled-${scene.id}").semantics {
                     contentDescription = "${scene.name}场景启用状态"
@@ -450,22 +448,19 @@ private fun SceneCard(
                 checked = scene.enabled,
                 onCheckedChange = onEnabledChange
             )
-        }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatusBadge(intentLabel(scene), BadgeTone.Info)
-            StatusBadge("优先级 ${scene.priority}", BadgeTone.Neutral)
-            StatusBadge(backend.displayLabel(), if (backend == ExecutionBackend.DRY_RUN) BadgeTone.Info else BadgeTone.Warning)
-            StatusBadge("离场恢复", BadgeTone.Good)
-        }
+            }
+        )
         Text(
-            if (scene.enabled) "开关关闭会停用后续命中；正在生效的场景由服务执行恢复。" else "重新启用前必须运行安全预演。",
+            "${backend.displayLabel()} · 离场恢复原值",
+            modifier = Modifier.padding(start = 72.dp, end = 16.dp, bottom = 10.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        OutlinedButton(onClick = onEdit) { Icon(Icons.Rounded.Edit, null); Text("查看并调整链路") }
+        HorizontalDivider(Modifier.padding(start = 72.dp), color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun RealEnableDialog(
     backend: ExecutionBackend,
@@ -474,30 +469,31 @@ private fun RealEnableDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Rounded.Security, null, tint = QijingAmber) },
-        title = { Text("启用并允许自动调节") },
-        text = {
-            Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text("执行方式：${backend.displayLabel()}")
-                Text("作用应用：${draft.packages.joinToString()}")
-                preparation?.plan?.commands?.forEach { command ->
-                    val target = command.arguments["value"] ?: command.arguments["khz"] ?: "—"
-                    val original = preparation.snapshot?.values?.get(command.capability) ?: "未读取"
-                    Text("${command.capability}：参考原值 $original → 目标 $target", style = MaterialTheme.typography.bodySmall)
-                }
-                Text("作用时机：目标应用进入前台")
-                Text("恢复时机：离场、场景切换或停止服务")
-                Text("实际执行前会重新读取原值；快照不完整则本次不写入。调度变化可能影响功耗、温度和稳定性。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Rounded.Security, null, tint = QijingAmber)
+                Text("启用并允许自动调节", style = MaterialTheme.typography.titleLarge)
             }
-        },
-        confirmButton = { Button(modifier = Modifier.testTag("scene-enable-confirm"), onClick = onConfirm) { Text("启用并允许自动调节") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
-    )
+            NativeListRow(title = "执行方式", supporting = "不会静默切换", status = backend.displayLabel())
+            NativeListRow(title = "作用应用", supporting = draft.packages.joinToString())
+            preparation?.plan?.commands?.forEach { command ->
+                val target = command.arguments["value"] ?: command.arguments["khz"] ?: "—"
+                val original = preparation.snapshot?.values?.get(command.capability) ?: "未读取"
+                NativeListRow(title = command.capability, supporting = "参考原值 $original", status = "→ $target")
+            }
+            NativeListRow(title = "作用时机", supporting = "目标应用进入前台")
+            NativeListRow(title = "恢复条件", supporting = "离场、场景切换或停止服务")
+            Text("真正执行前会重新读取原值；快照不完整则不写入。调度变化可能影响功耗、温度和稳定性。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            Button(modifier = Modifier.fillMaxWidth().testTag("scene-enable-confirm"), onClick = onConfirm) { Text("启用并允许自动调节") }
+            TextButton(modifier = Modifier.fillMaxWidth(), onClick = onDismiss) { Text("取消") }
+        }
+    }
 }
 
 private suspend fun prepareScene(context: Context, backend: ExecutionBackend, draft: SceneDraft): ScenePreparation = withContext(Dispatchers.IO) {

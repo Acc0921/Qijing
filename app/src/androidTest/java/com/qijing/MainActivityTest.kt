@@ -31,7 +31,9 @@ class MainActivityTest {
             composeRule.onNodeWithTag("fps-unsupported").assertIsDisplayed()
         } else {
             composeRule.onNodeWithTag("fps-start").assertIsDisplayed()
+            composeRule.onNodeWithTag("fps-start").performClick()
             composeRule.onNodeWithTag("fps-stop").assertIsDisplayed()
+            composeRule.onNodeWithTag("fps-stop").performClick()
         }
     }
 

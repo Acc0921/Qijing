@@ -5,32 +5,50 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.os.Build
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.FiberManualRecord
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.IosShare
-import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.QueryStats
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -47,6 +65,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MonitorScreen(store: NewDataStore) {
     val context = LocalContext.current
@@ -56,6 +75,7 @@ internal fun MonitorScreen(store: NewDataStore) {
     var collector by remember { mutableStateOf<WindowFpsCollector?>(null) }
     var activeSessionId by remember { mutableStateOf<String?>(null) }
     var latest by remember { mutableStateOf<FpsWindowSample?>(null) }
+    val recentSamples = remember { mutableStateListOf<FpsWindowSample>() }
     var selectedSummary by remember { mutableStateOf<FpsSessionSummary?>(null) }
     var sessionIds by remember(store) { mutableStateOf(store.telemetrySessionIds()) }
 
@@ -65,218 +85,276 @@ internal fun MonitorScreen(store: NewDataStore) {
         }
     }
 
-    LazyColumn(
-        contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            ScreenHeader(
-                eyebrow = "M8 · FRAME MONITOR",
-                title = "窗口流畅度",
-                summary = "用系统 FrameMetrics 观察栖境自身窗口。采样只保存在本机，不读取或注入其他应用。"
-            )
-        }
+    Column(Modifier.fillMaxSize()) {
+        QijingTopAppBar(title = "监控")
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N || activity == null) {
+            UnsupportedMonitor(Modifier.weight(1f))
+            return@Column
+        }
+
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(bottom = 24.dp)
+        ) {
             item {
-                QijingPanel(elevated = true) {
-                    StatusBadge("当前设备不可用", BadgeTone.Danger)
+                WindowBoundaryNotice()
+                HorizontalDivider()
+            }
+            item {
+                LiveReading(
+                    running = collector != null,
+                    sample = latest,
+                    samples = recentSamples,
+                    activeSessionId = activeSessionId,
+                    onToggle = {
+                        if (collector == null) {
+                            recentSamples.clear()
+                            val next = WindowFpsCollector(activity, monitor, onSample = {
+                                latest = it
+                                recentSamples += it
+                                if (recentSamples.size > 30) recentSamples.removeAt(0)
+                            })
+                            if (next.start()) {
+                                collector = next
+                                activeSessionId = monitor.currentSessionId()
+                                latest = null
+                                selectedSummary = null
+                            }
+                        } else {
+                            val stoppedSession = activeSessionId
+                            collector?.stop()
+                            collector = null
+                            stoppedSession?.let { selectedSummary = analyzer.summarize(it) }
+                            sessionIds = store.telemetrySessionIds()
+                        }
+                    }
+                )
+                HorizontalDivider()
+            }
+            selectedSummary?.let { summary ->
+                item {
+                    SessionSummary(summary)
+                    HorizontalDivider()
+                }
+            }
+            item {
+                SectionLabel(
+                    title = "历史会话",
+                    detail = if (sessionIds.isEmpty()) "暂无记录" else "最近 ${sessionIds.size.coerceAtMost(5)} 次"
+                )
+            }
+            if (sessionIds.isEmpty()) {
+                item {
                     Text(
-                        "窗口帧指标需要 Android 7.0 或更高版本，并且只能在 Activity 窗口中采集。",
-                        modifier = Modifier.testTag("fps-unsupported"),
-                        color = MaterialTheme.colorScheme.error
+                        "开始监控并产生至少一个采样窗口后，记录会显示在这里。",
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-            }
-            return@LazyColumn
-        }
-
-        item {
-            FpsLivePanel(
-                running = collector != null,
-                sample = latest,
-                activeSessionId = activeSessionId,
-                onStart = {
-                    val next = WindowFpsCollector(activity, monitor, onSample = { latest = it })
-                    if (next.start()) {
-                        collector = next
-                        activeSessionId = monitor.currentSessionId()
-                        latest = null
-                        selectedSummary = null
-                    }
-                },
-                onStop = {
-                    val stoppedSession = activeSessionId
-                    collector?.stop()
-                    collector = null
-                    stoppedSession?.let { selectedSummary = analyzer.summarize(it) }
-                    sessionIds = store.telemetrySessionIds()
+            } else {
+                items(sessionIds.takeLast(5).asReversed(), key = { it }) { sessionId ->
+                    val samples = remember(sessionId, sessionIds) { store.telemetry(sessionId) }
+                    val summary = remember(sessionId, sessionIds) { analyzer.summarize(sessionId) }
+                    HistorySessionRow(
+                        sessionId = sessionId,
+                        timestampMs = samples.firstOrNull()?.timestampMs,
+                        summary = summary,
+                        onOpen = {
+                            activeSessionId = sessionId
+                            selectedSummary = summary
+                        },
+                        onShare = { context.shareCsv(sessionId, FpsCsvExporter.export(samples)) }
+                    )
+                    HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
                 }
-            )
-        }
-
-        selectedSummary?.let { summary ->
-            item { SessionSummaryPanel(summary) }
-        }
-
-        item {
-            SectionHeader(
-                title = "历史会话",
-                detail = "最近 ${sessionIds.size.coerceAtMost(5)} 次 · 最多在本机保留 50 次"
-            )
-        }
-
-        if (sessionIds.isEmpty()) {
-            item { EmptyState("还没有采样", "开始一次监控并至少产生一个采样窗口后，会话会出现在这里。") }
-        } else {
-            items(sessionIds.takeLast(5).asReversed(), key = { it }) { sessionId ->
-                val samples = remember(sessionId, sessionIds) { store.telemetry(sessionId) }
-                val summary = remember(sessionId, sessionIds) { analyzer.summarize(sessionId) }
-                HistorySessionPanel(
-                    sessionId = sessionId,
-                    timestampMs = samples.firstOrNull()?.timestampMs,
-                    summary = summary,
-                    onOpen = {
-                        activeSessionId = sessionId
-                        selectedSummary = summary
-                    },
-                    onShare = { context.shareCsv(sessionId, FpsCsvExporter.export(samples)) }
-                )
             }
         }
     }
 }
 
 @Composable
-private fun FpsLivePanel(
+private fun UnsupportedMonitor(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.fillMaxWidth().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(Icons.Rounded.Info, null, tint = MaterialTheme.colorScheme.error)
+        Text("此设备无法采集窗口帧指标", style = MaterialTheme.typography.titleLarge)
+        Text(
+            "FrameMetrics 需要 Android 7.0 或更高版本，并且只能在 Activity 窗口中工作。",
+            modifier = Modifier.testTag("fps-unsupported"),
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun WindowBoundaryNotice() {
+    ListItem(
+        headlineContent = { Text("仅测量栖境自身窗口") },
+        supportingContent = { Text("使用系统 FrameMetrics；不读取、不注入其他应用，也不代表外部游戏 FPS。") },
+        leadingContent = { Icon(Icons.Rounded.Info, null, tint = MaterialTheme.colorScheme.primary) },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+    )
+}
+
+@Composable
+private fun LiveReading(
     running: Boolean,
     sample: FpsWindowSample?,
+    samples: List<FpsWindowSample>,
     activeSessionId: String?,
-    onStart: () -> Unit,
-    onStop: () -> Unit
+    onToggle: () -> Unit
 ) {
-    val tone = when {
-        !running -> BadgeTone.Neutral
-        sample == null -> BadgeTone.Info
-        sample.jankCount == 0 -> BadgeTone.Good
-        sample.jankCount <= 2 -> BadgeTone.Warning
-        else -> BadgeTone.Danger
+    val stateLabel = when {
+        !running -> "未记录"
+        sample == null -> "正在等待帧数据"
+        sample.jankCount == 0 -> "记录中 · 流畅"
+        sample.jankCount <= 2 -> "记录中 · 轻微波动"
+        else -> "记录中 · 卡顿明显"
     }
-    val state = when {
-        !running -> "待机"
-        sample == null -> "等待帧数据"
-        sample.jankCount == 0 -> "流畅"
-        sample.jankCount <= 2 -> "轻微波动"
-        else -> "卡顿明显"
+    val stateColor = when {
+        !running -> MaterialTheme.colorScheme.onSurfaceVariant
+        sample == null -> MaterialTheme.colorScheme.primary
+        sample.jankCount == 0 -> QijingMint
+        sample.jankCount <= 2 -> QijingAmber
+        else -> MaterialTheme.colorScheme.error
     }
 
-    QijingHero {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.SpaceBetween) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("实时 FPS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                Text(
-                    sample?.fps?.oneDecimal() ?: "--",
-                    fontSize = 68.sp,
-                    lineHeight = 72.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.FiberManualRecord, null, tint = stateColor)
+            Text(stateLabel, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.labelLarge, color = stateColor)
+            Spacer(Modifier.weight(1f))
+            activeSessionId?.let {
+                Text("${it.take(8)}…", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            StatusBadge(state, tone)
         }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricTile(
-                label = "平均帧耗时",
-                value = sample?.averageFrameTimeMs?.let { "${it.oneDecimal()} ms" } ?: "--",
-                detail = "最近 1 秒窗口",
-                modifier = Modifier.weight(1f)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+            Text(
+                sample?.fps?.oneDecimal() ?: "--",
+                fontSize = 38.sp,
+                lineHeight = 44.sp,
+                fontWeight = FontWeight.SemiBold
             )
-            MetricTile(
-                label = "卡顿 / 丢失",
-                value = sample?.let { "${it.jankCount} / ${it.droppedReportCount}" } ?: "--",
-                detail = sample?.let { "${it.frameCount} 帧参与统计" } ?: "等待采样",
-                modifier = Modifier.weight(1f),
-                accent = if ((sample?.jankCount ?: 0) > 2) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary
-            )
+            Text(" FPS", modifier = Modifier.padding(bottom = 5.dp), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(
-                modifier = Modifier.weight(1f).testTag("fps-start"),
-                enabled = !running,
-                onClick = onStart
-            ) {
-                Icon(Icons.Rounded.PlayArrow, null)
-                Text("开始")
-            }
-            OutlinedButton(
-                modifier = Modifier.weight(1f).testTag("fps-stop"),
-                enabled = running,
-                onClick = onStop
-            ) {
-                Icon(Icons.Rounded.Pause, null)
-                Text("停止并汇总")
-            }
+        FpsTrend(samples = samples, running = running)
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            CompactMetric("帧耗时", sample?.averageFrameTimeMs?.let { "${it.oneDecimal()} ms" } ?: "--", Modifier.weight(1f))
+            CompactMetric("卡顿帧", sample?.jankCount?.toString() ?: "--", Modifier.weight(1f))
+            CompactMetric("丢失报告", sample?.droppedReportCount?.toString() ?: "--", Modifier.weight(1f))
         }
-        activeSessionId?.let {
-            Text("Session ${it.take(8)}…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+
+        Button(
+            modifier = Modifier.fillMaxWidth().testTag(if (running) "fps-stop" else "fps-start"),
+            onClick = onToggle
+        ) {
+            Icon(if (running) Icons.Rounded.Stop else Icons.Rounded.PlayArrow, null)
+            Text(if (running) "停止并生成摘要" else "开始记录", modifier = Modifier.padding(start = 8.dp))
         }
     }
 }
 
 @Composable
-private fun SessionSummaryPanel(summary: FpsSessionSummary) {
-    QijingPanel(elevated = true) {
-        SectionHeader("会话摘要", "${summary.sampleCount} 个采样窗口") {
-            StatusBadge("已完成", BadgeTone.Good)
+private fun FpsTrend(samples: List<FpsWindowSample>, running: Boolean) {
+    val lineColor = MaterialTheme.colorScheme.primary
+    val gridColor = MaterialTheme.colorScheme.outlineVariant
+    Box(Modifier.fillMaxWidth().height(88.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            drawLine(gridColor, start = androidx.compose.ui.geometry.Offset(0f, size.height * 0.25f), end = androidx.compose.ui.geometry.Offset(size.width, size.height * 0.25f))
+            drawLine(gridColor, start = androidx.compose.ui.geometry.Offset(0f, size.height * 0.75f), end = androidx.compose.ui.geometry.Offset(size.width, size.height * 0.75f))
+            if (samples.size > 1) {
+                val values = samples.map { it.averageFrameTimeMs.coerceIn(0.0, 50.0) }
+                val path = Path()
+                values.forEachIndexed { index, value ->
+                    val x = size.width * index / (values.size - 1).coerceAtLeast(1)
+                    val y = size.height * (value / 50.0).toFloat()
+                    if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                }
+                drawPath(path, lineColor, style = Stroke(width = 4f))
+            }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            MetricTile("平均 FPS", summary.averageFps.oneDecimal(), "${summary.minFps.oneDecimal()}–${summary.maxFps.oneDecimal()}", Modifier.weight(1f))
-            MetricTile("P95 帧耗时", "${summary.p95FrameTimeMs.oneDecimal()} ms", "95% 的窗口不高于此值", Modifier.weight(1f), QijingBlue)
-            MetricTile("累计卡顿", summary.totalJank.toString(), "整个会话", Modifier.weight(1f), if (summary.totalJank > 0) QijingAmber else QijingMint)
+        if (samples.size < 2) {
+            Text(
+                if (running) "等待形成帧时间趋势" else "开始记录后显示帧时间趋势",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
 
 @Composable
-private fun HistorySessionPanel(
+private fun CompactMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(value, style = MaterialTheme.typography.titleMedium)
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun SessionSummary(summary: FpsSessionSummary) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SectionLabel("本次会话摘要", "${summary.sampleCount} 个采样窗口", horizontalPadding = 0.dp)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            CompactMetric("平均 FPS", summary.averageFps.oneDecimal(), Modifier.weight(1f))
+            CompactMetric("最低 / 最高", "${summary.minFps.oneDecimal()} / ${summary.maxFps.oneDecimal()}", Modifier.weight(1f))
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            CompactMetric("P95 帧耗时", "${summary.p95FrameTimeMs.oneDecimal()} ms", Modifier.weight(1f))
+            CompactMetric("累计卡顿", summary.totalJank.toString(), Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun SectionLabel(title: String, detail: String, horizontalPadding: androidx.compose.ui.unit.Dp = 24.dp) {
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = horizontalPadding, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.weight(1f))
+        Text(detail, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun HistorySessionRow(
     sessionId: String,
     timestampMs: Long?,
     summary: FpsSessionSummary?,
     onOpen: () -> Unit,
     onShare: () -> Unit
 ) {
-    QijingPanel {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Icon(Icons.Rounded.QueryStats, null, tint = MaterialTheme.colorScheme.primary)
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Session ${sessionId.take(8)}…", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    timestampMs?.let(::formatSessionTime) ?: "时间未知",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            summary?.let { StatusBadge("${it.averageFps.oneDecimal()} FPS", BadgeTone.Info) }
-        }
-        summary?.let {
+    ListItem(
+        headlineContent = { Text(timestampMs?.let(::formatSessionTime) ?: "时间未知") },
+        supportingContent = {
             Text(
-                "P95 ${it.p95FrameTimeMs.oneDecimal()} ms · 卡顿 ${it.totalJank} · ${it.sampleCount} 个窗口",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                summary?.let { "${it.averageFps.oneDecimal()} FPS · P95 ${it.p95FrameTimeMs.oneDecimal()} ms · 卡顿 ${it.totalJank}" }
+                    ?: "Session ${sessionId.take(8)}…"
             )
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = onOpen, enabled = summary != null, modifier = Modifier.weight(1f)) {
-                Text("查看摘要")
+        },
+        leadingContent = { Icon(Icons.Rounded.QueryStats, null, tint = MaterialTheme.colorScheme.primary) },
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onOpen, enabled = summary != null) {
+                    Icon(Icons.Rounded.Visibility, "查看摘要")
+                }
+                TextButton(onClick = onShare) {
+                    Icon(Icons.Rounded.IosShare, null)
+                    Text("CSV", modifier = Modifier.padding(start = 4.dp))
+                }
             }
-            Button(onClick = onShare, modifier = Modifier.weight(1f)) {
-                Icon(Icons.Rounded.IosShare, null)
-                Text("分享 CSV")
-            }
-        }
-    }
+        },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+    )
 }
 
 private fun Double.oneDecimal(): String = String.format(Locale.US, "%.1f", this)
