@@ -14,5 +14,5 @@ dependencyResolutionManagement {
         google(); mavenCentral()
     }
 }
-rootProject.name = "scene-pilot"
+rootProject.name = "Qijing"
 include(":app")

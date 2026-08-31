@@ -2,7 +2,7 @@
 
 检索日期：2026-08-31。以下按“Android root/性能/应用管理/ZRAM/FPS”关键词搜索后，选取相关度最高的 10 个公开仓库；Star 只是公开热度指标，不代表产品质量排名。只借鉴公开的产品思路，不复制代码、资源或旧应用结构。
 
-| 仓库 | Stars（检索时） | 可借鉴点 | 帧域的取舍 |
+| 仓库 | Stars（检索时） | 可借鉴点 | 栖境的取舍 |
 | --- | ---: | --- | --- |
 | [Hamza417/Inure](https://github.com/Hamza417/Inure) | 1,898 | Root/Shizuku 应用管理、分析、定制主题 | M2 增加后端状态和应用健康摘要；不引入内置终端和内容商店 |
 | [Androidacy/MagiskModuleManager](https://github.com/Androidacy/MagiskModuleManager) | 1,232 | 模块发现、安装前信息确认 | 第一版排除在线模块商店，只保留本地能力契约 |
