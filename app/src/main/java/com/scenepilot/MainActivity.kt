@@ -46,6 +46,7 @@ import com.scenepilot.feature.apps.ApplicationCatalog
 import com.scenepilot.feature.overview.OverviewPresenter
 import com.scenepilot.feature.scene.SceneDraft
 import com.scenepilot.feature.scene.SceneDraftStore
+import com.scenepilot.core.logging.SharedPreferencesTaskLogStore
 import com.scenepilot.feature.tuning.CpuStatusReader
 import com.scenepilot.feature.tuning.MemoryStatusReader
 import com.scenepilot.feature.telemetry.FpsMonitor
@@ -124,6 +125,7 @@ private fun ModulePage(code: String, store: NewDataStore) {
                 Text("可用后端：${overview.device?.availableBackends?.joinToString { it.name } ?: ExecutionBackend.DRY_RUN.name}", color = MaterialTheme.colorScheme.primary)
                 Text("只读能力：${overview.device?.capabilities?.joinToString().ifNullOrEmpty { "未发现" }}", style = MaterialTheme.typography.bodySmall)
             } }
+            TaskLogCard()
         }
         "M2" -> AppListPage(store)
         "M3" -> SceneEditorPage(store)
@@ -205,15 +207,51 @@ private fun SceneEditorPage(store: NewDataStore) {
     var draft by remember { mutableStateOf(SceneDraft("scene-${System.currentTimeMillis()}", "")) }
     var packageInput by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<String?>(null) }
+    val sceneStore = remember(store) { SceneDraftStore(store) }
+    var scenes by remember(store) { mutableStateOf(sceneStore.load()) }
     Card(modifier = Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("应用场景", style = MaterialTheme.typography.titleLarge)
         OutlinedTextField(draft.name, { draft = draft.copy(name = it) }, label = { Text("场景名称") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(packageInput, { packageInput = it; draft = draft.copy(packages = it.split(',').map(String::trim).filter(String::isNotEmpty).toSet()) }, label = { Text("应用包名（逗号分隔）") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(draft.governor, { draft = draft.copy(governor = it) }, label = { Text("Governor（可选）") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(draft.swappiness, { draft = draft.copy(swappiness = it) }, label = { Text("Swappiness 0-200") }, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { val errors = SceneDraftStore(store).save(draft); message = if (errors.isEmpty()) "场景已保存" else errors.joinToString("；") }) { Text("保存场景") }
+        Button(onClick = { val errors = sceneStore.save(draft); if (errors.isEmpty()) scenes = sceneStore.load(); message = if (errors.isEmpty()) "场景已保存" else errors.joinToString("；") }) { Text("保存场景") }
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+        Text("已保存场景 ${scenes.size} 个", style = MaterialTheme.typography.titleMedium)
+        if (scenes.isEmpty()) {
+            Text("还没有场景。保存后可在这里启停或继续编辑。", style = MaterialTheme.typography.bodySmall)
+        } else scenes.forEach { scene ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(scene.name, modifier = Modifier.weight(1f))
+                        Switch(checked = scene.enabled, onCheckedChange = { enabled -> sceneStore.setEnabled(scene.id, enabled); scenes = sceneStore.load() })
+                    }
+                    Text(if (scene.packageNames.isEmpty()) "未绑定应用" else scene.packageNames.joinToString(), style = MaterialTheme.typography.bodySmall)
+                    Button(onClick = { draft = SceneDraft.fromProfile(scene); packageInput = scene.packageNames.joinToString(",") }) { Text("编辑") }
+                }
+            }
+        }
     } }
+}
+
+@Composable
+private fun TaskLogCard() {
+    val context = LocalContext.current
+    val store = remember { SharedPreferencesTaskLogStore(context) }
+    var logs by remember { mutableStateOf(store.recent(5)) }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                Text("最近任务", style = MaterialTheme.typography.titleMedium)
+                Button(onClick = { logs = store.recent(5) }) { Text("刷新") }
+            }
+            if (logs.isEmpty()) Text("暂无任务记录；场景服务运行后会在这里显示结果。", style = MaterialTheme.typography.bodySmall)
+            logs.asReversed().forEach { log ->
+                Text("${if (log.success) "✓" else "!"} ${log.stage} · ${log.message}", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
 }
 
 @Composable

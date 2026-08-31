@@ -16,6 +16,20 @@ data class SceneDraft(
     val zramSizeMiB: String = "",
     val swappiness: String = "60"
 ) {
+    companion object {
+        fun fromProfile(profile: SceneProfile): SceneDraft = SceneDraft(
+            id = profile.id,
+            name = profile.name,
+            packages = profile.packageNames,
+            governor = profile.cpu.governor.orEmpty(),
+            minFrequencyKHz = profile.cpu.minFrequencyKHz?.toString().orEmpty(),
+            maxFrequencyKHz = profile.cpu.maxFrequencyKHz?.toString().orEmpty(),
+            zramEnabled = profile.memory.zramEnabled ?: true,
+            zramSizeMiB = profile.memory.zramSizeBytes?.div(1024 * 1024L)?.toString().orEmpty(),
+            swappiness = profile.memory.swappiness?.toString() ?: "60"
+        )
+    }
+
     fun validate(): List<String> = buildList {
         if (name.isBlank()) add("场景名称不能为空")
         val min = minFrequencyKHz.toLongOrNull(); val max = maxFrequencyKHz.toLongOrNull()
@@ -38,4 +52,7 @@ data class SceneDraft(
 class SceneDraftStore(private val store: NewDataStore) {
     fun save(draft: SceneDraft): List<String> { val errors = draft.validate(); if (errors.isEmpty()) store.saveScene(draft.toProfile()); return errors }
     fun load(): List<SceneProfile> = store.scenes()
+    fun setEnabled(id: String, enabled: Boolean) {
+        store.scenes().firstOrNull { it.id == id }?.let { store.saveScene(it.copy(enabled = enabled)) }
+    }
 }
