@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -68,7 +69,7 @@ private fun ScenePilotApp() {
     val modules = remember { listOf("设备总览" to "M1", "应用列表" to "M2", "应用场景" to "M3", "CPU 调节" to "M4", "内存与 ZRAM" to "M5", "FPS 监控" to "M8") }
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-            LazyColumn(contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyColumn(modifier = Modifier.testTag("home"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
                     Text("帧域", style = MaterialTheme.typography.headlineLarge)
                     Text("设备性能场景控制台", style = MaterialTheme.typography.bodyMedium)
@@ -76,7 +77,7 @@ private fun ScenePilotApp() {
                     SceneServiceControl()
                 }
                 items(modules) { (name, code) ->
-                    Card(modifier = Modifier.fillMaxWidth().clickable { selected = code }) { Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text(name); Text(code, color = MaterialTheme.colorScheme.primary) } }
+                    Card(modifier = Modifier.fillMaxWidth().testTag("module-$code").clickable { selected = code }) { Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text(name); Text(code, color = MaterialTheme.colorScheme.primary) } }
                 }
                 item { ModulePage(selected, store) }
             }
@@ -103,7 +104,7 @@ private fun SceneServiceControl() {
             Button(onClick = {
                 context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
             }) { Text("权限设置") }
-            Button(enabled = access.granted || running, onClick = {
+            Button(modifier = Modifier.testTag("service-toggle"), enabled = access.granted || running, onClick = {
                 val intent = Intent(context, com.scenepilot.core.scene.SceneTriggerService::class.java)
                 if (running) context.stopService(intent) else ContextCompat.startForegroundService(context, intent)
                 running = !running
@@ -155,7 +156,7 @@ private fun FpsMonitorPage(store: NewDataStore) {
                 Text("当前 Android 版本不支持窗口帧指标。", color = MaterialTheme.colorScheme.error)
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(enabled = collector == null, onClick = {
+                    Button(modifier = Modifier.testTag("fps-start"), enabled = collector == null, onClick = {
                         val c = WindowFpsCollector(activity, monitor, onSample = { latest = it })
                         if (c.start()) {
                             collector = c
@@ -163,7 +164,7 @@ private fun FpsMonitorPage(store: NewDataStore) {
                             summary = null
                         }
                     }) { Text("开始采集") }
-                    Button(enabled = collector != null, onClick = {
+                    Button(modifier = Modifier.testTag("fps-stop"), enabled = collector != null, onClick = {
                         collector?.stop()
                         collector = null
                         activeSession?.let { summary = com.scenepilot.feature.telemetry.FpsSessionAnalyzer(store).summarize(it) }
@@ -215,7 +216,7 @@ private fun SceneEditorPage(store: NewDataStore) {
         OutlinedTextField(packageInput, { packageInput = it; draft = draft.copy(packages = it.split(',').map(String::trim).filter(String::isNotEmpty).toSet()) }, label = { Text("应用包名（逗号分隔）") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(draft.governor, { draft = draft.copy(governor = it) }, label = { Text("Governor（可选）") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(draft.swappiness, { draft = draft.copy(swappiness = it) }, label = { Text("Swappiness 0-200") }, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { val errors = sceneStore.save(draft); if (errors.isEmpty()) scenes = sceneStore.load(); message = if (errors.isEmpty()) "场景已保存" else errors.joinToString("；") }) { Text("保存场景") }
+        Button(modifier = Modifier.testTag("scene-save"), onClick = { val errors = sceneStore.save(draft); if (errors.isEmpty()) scenes = sceneStore.load(); message = if (errors.isEmpty()) "场景已保存" else errors.joinToString("；") }) { Text("保存场景") }
         message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         Text("已保存场景 ${scenes.size} 个", style = MaterialTheme.typography.titleMedium)
         if (scenes.isEmpty()) {
