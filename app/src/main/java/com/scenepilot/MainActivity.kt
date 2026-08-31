@@ -51,6 +51,8 @@ import com.scenepilot.core.logging.SharedPreferencesTaskLogStore
 import com.scenepilot.feature.tuning.CpuStatusReader
 import com.scenepilot.feature.tuning.MemoryStatusReader
 import com.scenepilot.feature.telemetry.FpsMonitor
+import com.scenepilot.feature.telemetry.FpsCsvExporter
+import com.scenepilot.feature.telemetry.FpsSessionAnalyzer
 import com.scenepilot.feature.telemetry.FpsWindowSample
 import com.scenepilot.feature.telemetry.WindowFpsCollector
 
@@ -151,6 +153,7 @@ private fun FpsMonitorPage(store: NewDataStore) {
     var activeSession by remember { mutableStateOf<String?>(null) }
     var latest by remember { mutableStateOf<FpsWindowSample?>(null) }
     var summary by remember { mutableStateOf<com.scenepilot.feature.telemetry.FpsSessionSummary?>(null) }
+    var sessionIds by remember(store) { mutableStateOf(store.telemetrySessionIds()) }
     DisposableEffect(Unit) {
         onDispose { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) collector?.stop() }
     }
@@ -173,7 +176,8 @@ private fun FpsMonitorPage(store: NewDataStore) {
                     Button(modifier = Modifier.testTag("fps-stop"), enabled = collector != null, onClick = {
                         collector?.stop()
                         collector = null
-                        activeSession?.let { summary = com.scenepilot.feature.telemetry.FpsSessionAnalyzer(store).summarize(it) }
+                        activeSession?.let { summary = FpsSessionAnalyzer(store).summarize(it) }
+                        sessionIds = store.telemetrySessionIds()
                     }) { Text("结束并汇总") }
                 }
                 Text(if (collector != null) "状态：采集中" else "状态：待机", color = MaterialTheme.colorScheme.primary)
@@ -185,6 +189,28 @@ private fun FpsMonitorPage(store: NewDataStore) {
                 summary?.let {
                     Text("会话平均 ${"%.1f".format(it.averageFps)} FPS · P95 ${"%.1f".format(it.p95FrameTimeMs)} ms")
                     Text("最低 ${"%.1f".format(it.minFps)} · 最高 ${"%.1f".format(it.maxFps)} · 卡顿 ${it.totalJank}", style = MaterialTheme.typography.bodySmall)
+                }
+                Text("历史 Session", style = MaterialTheme.typography.titleMedium)
+                if (sessionIds.isEmpty()) {
+                    Text("暂无完成采样的会话。", style = MaterialTheme.typography.bodySmall)
+                }
+                sessionIds.takeLast(5).asReversed().forEach { sessionId ->
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Session ${sessionId.take(8)}…", style = MaterialTheme.typography.bodySmall)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { summary = FpsSessionAnalyzer(store).summarize(sessionId); activeSession = sessionId }) { Text("查看摘要") }
+                                Button(onClick = {
+                                    val share = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/csv"
+                                        putExtra(Intent.EXTRA_SUBJECT, "帧域 FPS Session ${sessionId.take(8)}")
+                                        putExtra(Intent.EXTRA_TEXT, FpsCsvExporter.export(store.telemetry(sessionId)))
+                                    }
+                                    context.startActivity(Intent.createChooser(share, "分享 FPS CSV"))
+                                }) { Text("分享 CSV") }
+                            }
+                        }
+                    }
                 }
             }
         }

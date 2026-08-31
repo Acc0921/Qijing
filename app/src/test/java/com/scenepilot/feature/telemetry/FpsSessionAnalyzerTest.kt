@@ -20,4 +20,12 @@ class FpsSessionAnalyzerTest {
         assertEquals(33.0, summary.p95FrameTimeMs, 0.001)
         assertEquals(3, summary.totalJank)
     }
+
+    @Test fun `session index keeps first seen order without duplicates`() {
+        val store = InMemoryNewDataStore()
+        store.appendTelemetry(TelemetrySample("s1", 1, 60.0, 16.0, 0))
+        store.appendTelemetry(TelemetrySample("s2", 2, 30.0, 33.0, 1))
+        store.appendTelemetry(TelemetrySample("s1", 3, 55.0, 18.0, 0))
+        assertEquals(listOf("s1", "s2"), store.telemetrySessionIds())
+    }
 }

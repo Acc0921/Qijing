@@ -22,7 +22,7 @@
 | CPU 状态 | `feature.tuning.CpuStatusReader` | M4 页面只读显示核心在线数、governor、频率范围并支持刷新 |
 | 内存与 ZRAM | `feature.tuning.MemoryTuner` / `MemoryTuningController` | 已有 swappiness/ZRAM 参数校验、执行状态和 command 入口 |
 | 内存状态 | `feature.tuning.MemoryStatusReader` | M5 页面只读显示 MemTotal/MemAvailable、ZRAM 容量和压缩算法并支持刷新 |
-| FPS 监控 | `feature.telemetry.WindowFpsCollector` / `FpsMonitor` / `FpsSessionAnalyzer` | Android 7+ 当前窗口 FrameMetrics 采集，1 秒聚合后持久化，提供平均/极值/P95 frame time/jank 摘要；外部应用采集仍待兼容后端 |
+| FPS 监控 | `feature.telemetry.WindowFpsCollector` / `FpsMonitor` / `FpsSessionAnalyzer` / `FpsCsvExporter` | Android 7+ 当前窗口 FrameMetrics 采集，1 秒聚合后持久化；支持历史列表、摘要回看和 CSV 系统分享；外部应用采集仍待兼容后端 |
 | 新 UI | `MainActivity` | 已有可点击模块导航、M1 总览、M2 搜索筛选、M3 场景保存和 M4/M5/M8 状态页 |
 
 下一阶段按此表逐项替换内存实现：先扩大只读采集覆盖和测试，再接入需要回滚快照的写入后端。

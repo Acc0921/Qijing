@@ -15,6 +15,7 @@ interface NewDataStore {
     fun scenes(): List<SceneProfile>
     fun appendTelemetry(sample: TelemetrySample)
     fun telemetry(sessionId: String): List<TelemetrySample>
+    fun telemetrySessionIds(): List<String>
 }
 
 class InMemoryNewDataStore : NewDataStore {
@@ -30,4 +31,5 @@ class InMemoryNewDataStore : NewDataStore {
     override fun scenes() = sceneEntries.values.toList()
     override fun appendTelemetry(sample: TelemetrySample) { samples += sample }
     override fun telemetry(sessionId: String) = samples.filter { it.sessionId == sessionId }
+    override fun telemetrySessionIds(): List<String> = samples.map { it.sessionId }.distinct()
 }

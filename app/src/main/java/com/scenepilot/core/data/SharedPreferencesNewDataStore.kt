@@ -33,8 +33,21 @@ class SharedPreferencesNewDataStore(context: Context) : NewDataStore {
     @Synchronized override fun saveScene(scene: SceneProfile) { if (!supported()) return; val all = scenes().associateBy { it.id }.toMutableMap(); all[scene.id] = scene; prefs.edit().putString("scenes", JSONArray(all.values.map(::sceneJson)).toString()).apply() }
     @Synchronized override fun scenes(): List<SceneProfile> = if (!supported()) emptyList() else runCatching { prefs.getString("scenes", null)?.let { JSONArray(it).objects().map(::sceneFromJson) } ?: emptyList() }.getOrDefault(emptyList())
 
-    @Synchronized override fun appendTelemetry(sample: TelemetrySample) { if (!supported()) return; val all = telemetry(sample.sessionId).takeLast(MAX_TELEMETRY_SAMPLES - 1).toMutableList().apply { add(sample) }; prefs.edit().putString("telemetry:${sample.sessionId}", JSONArray(all.map { JSONObject().apply { put("t", it.timestampMs); put("fps", it.fps); put("frame", it.frameTimeMs); put("jank", it.jankCount) } }).toString()).apply() }
+    @Synchronized override fun appendTelemetry(sample: TelemetrySample) {
+        if (!supported()) return
+        val all = telemetry(sample.sessionId).takeLast(MAX_TELEMETRY_SAMPLES - 1).toMutableList().apply { add(sample) }
+        val updatedSessions = telemetrySessionIds().toMutableList().apply { remove(sample.sessionId); add(sample.sessionId) }
+        val sessions = updatedSessions.takeLast(MAX_TELEMETRY_SESSIONS)
+        val editor = prefs.edit()
+            .putString("telemetry:${sample.sessionId}", JSONArray(all.map { JSONObject().apply { put("t", it.timestampMs); put("fps", it.fps); put("frame", it.frameTimeMs); put("jank", it.jankCount) } }).toString())
+            .putString(TELEMETRY_SESSIONS_KEY, JSONArray(sessions).toString())
+        updatedSessions.filterNot(sessions::contains).forEach { editor.remove("telemetry:$it") }
+        editor.apply()
+    }
     @Synchronized override fun telemetry(sessionId: String): List<TelemetrySample> = if (!supported()) emptyList() else runCatching { prefs.getString("telemetry:$sessionId", null)?.let { JSONArray(it).objects().map { o -> TelemetrySample(sessionId, o.optLong("t"), o.optDouble("fps"), o.optDouble("frame"), o.optInt("jank")) } } ?: emptyList() }.getOrDefault(emptyList())
+    @Synchronized override fun telemetrySessionIds(): List<String> = if (!supported()) emptyList() else runCatching {
+        prefs.getString(TELEMETRY_SESSIONS_KEY, null)?.let { JSONArray(it).strings() } ?: emptyList()
+    }.getOrDefault(emptyList())
 
     private fun sceneJson(s: SceneProfile) = JSONObject().apply {
         put("id", s.id); put("name", s.name); put("packages", JSONArray(s.packageNames.toList())); put("priority", s.priority); put("enabled", s.enabled)
@@ -59,5 +72,7 @@ class SharedPreferencesNewDataStore(context: Context) : NewDataStore {
         const val SCHEMA_KEY = "schema_version"
         const val SCHEMA_VERSION = 1
         const val MAX_TELEMETRY_SAMPLES = 2_000
+        const val MAX_TELEMETRY_SESSIONS = 50
+        const val TELEMETRY_SESSIONS_KEY = "telemetry_sessions"
     }
 }
