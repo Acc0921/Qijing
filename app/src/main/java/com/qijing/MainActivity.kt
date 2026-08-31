@@ -91,7 +91,7 @@ private fun QijingApp() {
                     Card(modifier = Modifier.fillMaxWidth().testTag("module-$code").clickable {
                         selected = code
                         scope.launch { listState.animateScrollToItem(modules.size + 1) }
-                    }) { Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text(name); Text(code, color = MaterialTheme.colorScheme.primary) } }
+                    }) { Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text(name); Text(code, color = MaterialTheme.colorScheme.primary) } }
                 }
                 item {
                     ModulePage(selected, store, scenePackage) { packageName ->

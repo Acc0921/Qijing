@@ -7,6 +7,7 @@
 | 特权执行与 dry-run | `core.execution.ExecutionBroker` / `BackendRuntimeFactory` | 默认 dry-run；用户可显式选择 Root 或 Shizuku，不可用时返回明确拒绝且不静默切换 |
 | Root 后端 | `core.execution.RootExecutionBroker` / `ProcessSuTransport` | 固定支持 CPU governor/频率与 swappiness；参数白名单、超时、写后读回和稳定错误码已实现，待真机验收 |
 | Shizuku 后端 | `core.execution.ShizukuExecutionBroker` / `ShizukuUserServiceTransport` | SDK、显式授权、Binder UserService、固定白名单和断连错误已实现；Android 7+ 可用，待真机验收 |
+| Debug 调节模拟 | `debug.tuning.DebugTuningExecutionBroker` / `DebugRecoveryRunner` | 仅编入 debug；覆盖四项白名单能力、故障注入、journal 与重启恢复，release DEX/Manifest 隔离检查通过；不代表真实硬件可用 |
 | 只读 ADB | `core.execution.ReadOnlyAdbExecutionBroker` / `ProcessAdbTransport` | 固定命令映射和白名单；可注入 adb 进程传输，仍仅允许读取设备状态，尚无 Android 端连接管理 |
 | 设备能力探测 | `core.device.DeviceCapabilityProbe` / `BackendDetector` | 只读探测 CPU、内存、ZRAM、GPU 路径及后端可用性；尚未按具体后端验证写权限 |
 | 场景应用事务 | `core.scene.SceneEngine` | 整批命令先预检；真实后端要求全部快照可读才开始写入，失败按已执行命令逆序回滚并记录日志 |
@@ -19,7 +20,7 @@
 | 前台事件源 | `core.scene.UsageStatsForegroundAppSource` | 已通过 Usage Stats 只读获取前台包名；未授权时返回安全降级状态 |
 | 场景轮询 | `core.scene.ScenePollingLoop` | 已支持启动、停止和可配置间隔，仅在前台包名变化时发出事件 |
 | 后台承载 | `core.scene.SceneTriggerService` / `SceneServiceControl` | UI 可选择预览/Root/Shizuku、请求授权并启停；服务按选择装配后端，停止与事件源失效时先恢复活跃场景 |
-| 场景快照 | `core.scene.SceneSnapshotManager` / `BrokerSceneRestoreExecutor` | CPU governor/频率及 swappiness 原值可生成恢复命令；缺任一快照则阻断写入，恢复按逆序执行；待真机和持久化恢复验证 |
+| 场景快照 | `core.scene.SceneSnapshotManager` / `BrokerSceneRestoreExecutor` | CPU governor/频率及 swappiness 原值可生成恢复命令；缺任一快照则阻断写入，恢复按逆序执行；debug 持久化恢复已验证，正式后端仍待真机与跨进程恢复实现 |
 | CPU 调节 | `feature.tuning.CpuTuner` / `CpuTuningController` | 已有参数范围校验、执行状态和 command 入口；尚无真实写入与读回验证 |
 | CPU 状态 | `feature.tuning.CpuStatusReader` | M4 页面只读显示核心在线数、governor、频率范围并支持刷新 |
 | 内存与 ZRAM | `feature.tuning.MemoryTuner` / `MemoryTuningController` | 已有 swappiness/ZRAM 参数校验、执行状态和 command 入口；尚无真实写入与恢复 |
