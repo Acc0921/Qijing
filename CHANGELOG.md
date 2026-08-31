@@ -3,6 +3,8 @@
 ## 2026-08-31（Android 17 真机测试兼容）
 
 - 升级 AndroidX Test Runner、JUnit 与 Espresso，修复 Android 17 上旧版测试框架调用已移除隐藏 API 的问题。
+- 固定 AndroidX Tracing 1.2.0，补齐 Espresso 3.7 所需 API，同时保持与当前 AGP/R8 构建链兼容。
+- 增加真机 Root 只读握手测试，以 `id -u` 验证按应用授权、UID 0 返回与超时边界，不触发性能参数写入。
 - 建立主力机安全验收边界：Root、系统性能写入、重启与权限策略变更必须在逐项说明并获得确认后执行。
 
 ## 2026-08-31（模拟器验收）
