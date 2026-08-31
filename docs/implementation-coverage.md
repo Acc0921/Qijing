@@ -5,7 +5,7 @@
 | 能力 | 代码入口 | 当前状态 |
 | --- | --- | --- |
 | 特权执行与 dry-run | `core.execution.ExecutionBroker` | 已有统一接口和安全默认实现 |
-| 只读 ADB | `core.execution.ReadOnlyAdbExecutionBroker` | 固定命令映射和白名单，仅允许读取设备状态 |
+| 只读 ADB | `core.execution.ReadOnlyAdbExecutionBroker` / `ProcessAdbTransport` | 固定命令映射和白名单；可注入真实 adb 进程传输，仍仅允许读取设备状态 |
 | 设备能力探测 | `core.device.DeviceCapabilityProbe` / `BackendDetector` | 只读探测 CPU、内存、ZRAM、GPU 路径及后端可用性 |
 | 场景应用事务 | `core.scene.SceneEngine` | 已将 CPU/内存意图转换为结构化 command，并写入任务日志 |
 | 全新数据层 | `core.data.NewDataStore` | 已有设备、应用、场景、遥测新模型；无迁移 API |
@@ -22,7 +22,7 @@
 | CPU 状态 | `feature.tuning.CpuStatusReader` | M4 页面只读显示核心在线数、governor、频率范围并支持刷新 |
 | 内存与 ZRAM | `feature.tuning.MemoryTuner` / `MemoryTuningController` | 已有 swappiness/ZRAM 参数校验、执行状态和 command 入口 |
 | 内存状态 | `feature.tuning.MemoryStatusReader` | M5 页面只读显示 MemTotal/MemAvailable、ZRAM 容量和压缩算法并支持刷新 |
-| FPS 监控 | `feature.telemetry.FpsMonitor` / `FpsSessionAnalyzer` | 已有 session、采样、平均/极值/P95 frame time/jank 摘要 |
+| FPS 监控 | `feature.telemetry.WindowFpsCollector` / `FpsMonitor` / `FpsSessionAnalyzer` | Android 7+ 当前窗口 FrameMetrics 采集，1 秒聚合后持久化，提供平均/极值/P95 frame time/jank 摘要；外部应用采集仍待兼容后端 |
 | 新 UI | `MainActivity` | 已有可点击模块导航、M1 总览、M2 搜索筛选、M3 场景保存和 M4/M5/M8 状态页 |
 
 下一阶段按此表逐项替换内存实现：先扩大只读采集覆盖和测试，再接入需要回滚快照的写入后端。

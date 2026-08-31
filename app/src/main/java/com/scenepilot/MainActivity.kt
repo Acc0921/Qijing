@@ -1,6 +1,8 @@
 package com.scenepilot
 
 import android.os.Bundle
+import android.os.Build
+import android.app.Activity
 import android.content.Intent
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -46,6 +48,9 @@ import com.scenepilot.feature.scene.SceneDraft
 import com.scenepilot.feature.scene.SceneDraftStore
 import com.scenepilot.feature.tuning.CpuStatusReader
 import com.scenepilot.feature.tuning.MemoryStatusReader
+import com.scenepilot.feature.telemetry.FpsMonitor
+import com.scenepilot.feature.telemetry.FpsWindowSample
+import com.scenepilot.feature.telemetry.WindowFpsCollector
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -124,7 +129,56 @@ private fun ModulePage(code: String, store: NewDataStore) {
         "M3" -> SceneEditorPage(store)
         "M4" -> CpuStatusPage()
         "M5" -> MemoryStatusPage()
-        "M8" -> TuningPage("FPS 监控", "启动 session 后可记录 FPS、frame time 和 jank。")
+        "M8" -> FpsMonitorPage(store)
+    }
+}
+
+@Composable
+private fun FpsMonitorPage(store: NewDataStore) {
+    val context = LocalContext.current
+    val activity = context as? Activity
+    val monitor = remember(store) { FpsMonitor(store) }
+    var collector by remember { mutableStateOf<WindowFpsCollector?>(null) }
+    var activeSession by remember { mutableStateOf<String?>(null) }
+    var latest by remember { mutableStateOf<FpsWindowSample?>(null) }
+    var summary by remember { mutableStateOf<com.scenepilot.feature.telemetry.FpsSessionSummary?>(null) }
+    DisposableEffect(Unit) {
+        onDispose { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) collector?.stop() }
+    }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("FPS 监控", style = MaterialTheme.typography.titleLarge)
+            Text("采集当前应用窗口的 FrameMetrics；不会读取或注入其他应用。", style = MaterialTheme.typography.bodySmall)
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N || activity == null) {
+                Text("当前 Android 版本不支持窗口帧指标。", color = MaterialTheme.colorScheme.error)
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(enabled = collector == null, onClick = {
+                        val c = WindowFpsCollector(activity, monitor, onSample = { latest = it })
+                        if (c.start()) {
+                            collector = c
+                            activeSession = monitor.currentSessionId()
+                            summary = null
+                        }
+                    }) { Text("开始采集") }
+                    Button(enabled = collector != null, onClick = {
+                        collector?.stop()
+                        collector = null
+                        activeSession?.let { summary = com.scenepilot.feature.telemetry.FpsSessionAnalyzer(store).summarize(it) }
+                    }) { Text("结束并汇总") }
+                }
+                Text(if (collector != null) "状态：采集中" else "状态：待机", color = MaterialTheme.colorScheme.primary)
+                activeSession?.let { Text("Session ${it.take(8)}…", style = MaterialTheme.typography.bodySmall) }
+                latest?.let {
+                    Text("最近窗口：${"%.1f".format(it.fps)} FPS · 平均帧耗时 ${"%.1f".format(it.averageFrameTimeMs)} ms")
+                    Text("卡顿帧 ${it.jankCount} · 丢失报告 ${it.droppedReportCount}", style = MaterialTheme.typography.bodySmall)
+                }
+                summary?.let {
+                    Text("会话平均 ${"%.1f".format(it.averageFps)} FPS · P95 ${"%.1f".format(it.p95FrameTimeMs)} ms")
+                    Text("最低 ${"%.1f".format(it.minFps)} · 最高 ${"%.1f".format(it.maxFps)} · 卡顿 ${it.totalJank}", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
     }
 }
 

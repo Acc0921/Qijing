@@ -6,7 +6,7 @@
 
 | 模块 | 状态 | 已覆盖 | 尚缺内容 |
 | --- | --- | --- | --- |
-| C0 特权执行 | 🟡 | 统一 `ExecutionBroker`、dry-run、只读 ADB 命令白名单 | 真实 ADB transport、root/Shizuku/daemon 后端、权限申请和写入回滚 |
+| C0 特权执行 | 🟡 | 统一 `ExecutionBroker`、dry-run、只读 ADB 命令白名单、可注入进程 ADB transport | Android 端连接管理、root/Shizuku/daemon 写入后端、权限申请和写入回滚 |
 | C1 场景引擎 | 🟡 | 场景模型、前台包名匹配、优先级选择、结构化 command | 前台事件源、应用/恢复生命周期、真实快照、失败回滚实现 |
 | C2 能力探测 | 🟡 | Android 基础信息、CPU/内存/ZRAM/GPU 路径、后端可用性只读探测 | SoC/厂商 adapter、可写路径验证、重启后状态验证 |
 | C3 全新数据层 | 🟡 | 新设备/应用/场景/遥测模型，SharedPreferences 持久化 | schema 版本、并发事务、迁移策略（仅针对新 schema）、大数据量存储 |
@@ -22,7 +22,7 @@
 | M3 应用场景 | 🟡 | 场景名称、包名绑定、CPU/ZRAM 意图、保存和参数校验 | 触发器配置、启停、应用/恢复按钮、场景列表编辑、真实回滚 |
 | M4 CPU 调节 | 🟡 | 只读核心/Governor/频率、意图模型和校验 | 可编辑控件、设备能力约束、真实读写和恢复 |
 | M5 内存与 ZRAM | 🟡 | 只读内存/ZRAM、意图模型和校验 | 算法/容量/swappiness 控件、真实读写、快照和恢复 |
-| M8 FPS 监控 | 🟡 | session、采样模型、平均/极值/P95/jank 分析 | 真实采集源、开始/停止控制、曲线、session 列表和导出 |
+| M8 FPS 监控 | 🟡 | 当前窗口 FrameMetrics 真实采集、开始/停止控制、1 秒聚合、平均/极值/P95/jank 分析 | 外部游戏采集兼容、曲线、session 列表和导出 |
 
 ## 早期能力核对结果
 

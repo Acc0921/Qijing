@@ -5,7 +5,8 @@ import com.scenepilot.core.model.TelemetrySample
 import java.util.UUID
 
 class FpsMonitor(private val store: NewDataStore) {
-    private var sessionId: String? = null
+    @Volatile private var sessionId: String? = null
+    fun currentSessionId(): String? = sessionId
     fun start(): String { return UUID.randomUUID().toString().also { sessionId = it } }
     fun record(fps: Double, frameTimeMs: Double, jankCount: Int) {
         val session = sessionId ?: error("FPS session 未开始")
