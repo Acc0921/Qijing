@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Card
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
@@ -29,6 +30,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -58,6 +60,7 @@ import com.qijing.feature.telemetry.FpsCsvExporter
 import com.qijing.feature.telemetry.FpsSessionAnalyzer
 import com.qijing.feature.telemetry.FpsWindowSample
 import com.qijing.feature.telemetry.WindowFpsCollector
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,9 +76,11 @@ private fun QijingApp() {
     var selected by remember { mutableStateOf("M1") }
     var scenePackage by remember { mutableStateOf<String?>(null) }
     val modules = remember { listOf("设备总览" to "M1", "应用列表" to "M2", "应用场景" to "M3", "CPU 调节" to "M4", "内存与 ZRAM" to "M5", "FPS 监控" to "M8") }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-            LazyColumn(modifier = Modifier.testTag("home"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LazyColumn(state = listState, modifier = Modifier.testTag("home"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {
                     Text("栖境", style = MaterialTheme.typography.headlineLarge)
                     Text("设备性能场景控制台", style = MaterialTheme.typography.bodyMedium)
@@ -83,7 +88,10 @@ private fun QijingApp() {
                     SceneServiceControl()
                 }
                 items(modules) { (name, code) ->
-                    Card(modifier = Modifier.fillMaxWidth().testTag("module-$code").clickable { selected = code }) { Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text(name); Text(code, color = MaterialTheme.colorScheme.primary) } }
+                    Card(modifier = Modifier.fillMaxWidth().testTag("module-$code").clickable {
+                        selected = code
+                        scope.launch { listState.animateScrollToItem(modules.size + 1) }
+                    }) { Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text(name); Text(code, color = MaterialTheme.colorScheme.primary) } }
                 }
                 item {
                     ModulePage(selected, store, scenePackage) { packageName ->
@@ -203,7 +211,7 @@ private fun FpsMonitorPage(store: NewDataStore) {
             Text("FPS 监控", style = MaterialTheme.typography.titleLarge)
             Text("采集当前应用窗口的 FrameMetrics；不会读取或注入其他应用。", style = MaterialTheme.typography.bodySmall)
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N || activity == null) {
-                Text("当前 Android 版本不支持窗口帧指标。", color = MaterialTheme.colorScheme.error)
+                Text("当前 Android 版本不支持窗口帧指标。", color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("fps-unsupported"))
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(modifier = Modifier.testTag("fps-start"), enabled = collector == null, onClick = {

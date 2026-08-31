@@ -5,7 +5,14 @@ plugins {
 }
 
 android { namespace = "com.qijing"; compileSdk = 35; buildToolsVersion = "35.0.0"
-    defaultConfig { applicationId = "com.qijing"; minSdk = 23; targetSdk = 35; versionCode = 1; versionName = "0.1.0" }
+    defaultConfig {
+        applicationId = "com.qijing"
+        minSdk = 23
+        targetSdk = 35
+        versionCode = 1
+        versionName = "0.1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
     buildFeatures { aidl = true }
 }
 
