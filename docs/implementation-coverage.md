@@ -16,7 +16,7 @@
 | 场景选择 | `core.scene.SceneSelector` / `SceneActivationCoordinator` | 按前台包名、启用状态和优先级选择场景，并交给事务引擎执行 |
 | 前台事件源 | `core.scene.UsageStatsForegroundAppSource` | 通过 Usage Stats 只读获取前台包名，未授权时安全降级 |
 | 场景轮询 | `core.scene.ScenePollingLoop` | 可启动/停止、可配置间隔，仅在前台包名变化时发出事件 |
-| 后台承载 | `core.scene.SceneTriggerService` / `SceneServiceControl` | UI 明确启动/停止，Usage Stats 权限可跳转设置；停止时释放线程，当前使用 dry-run 引擎 |
+| 后台承载 | `core.scene.SceneTriggerService` / `SceneServiceControl` | UI 明确启动/停止，Usage Stats 权限可跳转设置；未授权时不启动轮询，停止时释放线程，当前使用 dry-run 引擎 |
 | 场景快照 | `core.scene.SceneSnapshotManager` | 执行前读取已声明能力并生成 restore command |
 | CPU 调节 | `feature.tuning.CpuTuner` / `CpuTuningController` | 已有参数范围校验、执行状态和 command 入口 |
 | CPU 状态 | `feature.tuning.CpuStatusReader` | M4 页面只读显示核心在线数、governor、频率范围并支持刷新 |

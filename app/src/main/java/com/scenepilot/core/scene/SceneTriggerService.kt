@@ -28,6 +28,7 @@ class SceneTriggerService : Service() {
         val store = SharedPreferencesNewDataStore(this)
         val coordinator = SceneActivationCoordinator(SceneSelector(), SceneEngine(DryRunExecutionBroker(), SharedPreferencesTaskLogStore(this)))
         val source = UsageStatsForegroundAppSource(this)
+        if (!source.accessState().granted) return
         polling = ScenePollingLoop(source) { packageName ->
             scope.launch { coordinator.onForeground(packageName, store.scenes()) }
         }.also { it.start() }

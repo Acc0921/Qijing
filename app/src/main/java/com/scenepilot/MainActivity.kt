@@ -103,7 +103,7 @@ private fun SceneServiceControl() {
             Button(onClick = {
                 context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
             }) { Text("权限设置") }
-            Button(onClick = {
+            Button(enabled = access.granted || running, onClick = {
                 val intent = Intent(context, com.scenepilot.core.scene.SceneTriggerService::class.java)
                 if (running) context.stopService(intent) else ContextCompat.startForegroundService(context, intent)
                 running = !running
