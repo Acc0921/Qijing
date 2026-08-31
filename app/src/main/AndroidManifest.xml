@@ -1,5 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <application android:theme="@style/Theme.ScenePilot" android:label="帧域">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
@@ -7,5 +9,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service android:name=".core.scene.SceneTriggerService" android:exported="false" android:foregroundServiceType="dataSync" />
     </application>
 </manifest>
