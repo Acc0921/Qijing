@@ -3,7 +3,7 @@ package com.scenepilot.core.scene
 import com.scenepilot.core.execution.TransactionResult
 import com.scenepilot.core.model.SceneProfile
 
-interface ForegroundAppSource { fun currentPackageName(): String? }
+fun interface ForegroundAppSource { fun currentPackageName(): String? }
 
 /** Coordinates a foreground event with the pure selector and transactional engine. */
 class SceneActivationCoordinator(private val selector: SceneSelector, private val engine: SceneEngine) {
