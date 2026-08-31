@@ -14,6 +14,7 @@
 | 应用列表 | `feature.apps.ApplicationCatalog` / `AppListController` | 已有系统应用查询、搜索和系统应用筛选 |
 | 应用场景 | `feature.scene.SceneDraft` / `SceneDraftStore` | 已有表单校验、应用包名绑定、意图转换和持久化保存 |
 | 场景选择 | `core.scene.SceneSelector` / `SceneActivationCoordinator` | 按前台包名、启用状态和优先级选择场景，并交给事务引擎执行 |
+| 前台事件源 | `core.scene.UsageStatsForegroundAppSource` | 通过 Usage Stats 只读获取前台包名，未授权时安全降级 |
 | 场景快照 | `core.scene.SceneSnapshotManager` | 执行前读取已声明能力并生成 restore command |
 | CPU 调节 | `feature.tuning.CpuTuner` / `CpuTuningController` | 已有参数范围校验、执行状态和 command 入口 |
 | CPU 状态 | `feature.tuning.CpuStatusReader` | M4 页面只读显示核心在线数、governor、频率范围并支持刷新 |
