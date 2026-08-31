@@ -1,5 +1,10 @@
 # 更新记录
 
+## 2026-08-31（Android 17 真机测试兼容）
+
+- 升级 AndroidX Test Runner、JUnit 与 Espresso，修复 Android 17 上旧版测试框架调用已移除隐藏 API 的问题。
+- 建立主力机安全验收边界：Root、系统性能写入、重启与权限策略变更必须在逐项说明并获得确认后执行。
+
 ## 2026-08-31（模拟器验收）
 
 - 增加 AndroidX instrumentation runner 配置，修复 Compose UI 测试在设备端发现用例前崩溃的问题。
