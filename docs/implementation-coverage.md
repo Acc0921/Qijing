@@ -10,20 +10,20 @@
 | Debug 调节模拟 | `debug.tuning.DebugTuningExecutionBroker` / `DebugRecoveryRunner` | 仅编入 debug；覆盖四项白名单能力、故障注入、journal 与重启恢复，release DEX/Manifest 隔离检查通过；不代表真实硬件可用 |
 | 只读 ADB | `core.execution.ReadOnlyAdbExecutionBroker` / `ProcessAdbTransport` | 固定命令映射和白名单；可注入 adb 进程传输，仍仅允许读取设备状态；Android 端不装配为写入后端 |
 | 设备能力探测 | `core.device.DeviceCapabilityProbe` / `BackendDetector` / `PrivilegedReadCommandMapper` | 探测 CPU、内存、ZRAM、GPU 和后端状态；Root/Shizuku 可通过固定只读模板获取写入前原值，真实设备可写性仍以逐项执行验收为准 |
-| 场景同源预演与事务 | `core.scene.SceneEngine.prepare` / `SceneEngine.apply` | `prepare` 与真实应用共用命令生成、白名单预检和快照逻辑，全程零写入；空计划和真实后端无快照读取能力均拒绝；`apply` 执行时重新准备，失败按已执行命令逆序回滚 |
-| 全新数据层 | `core.data.NewDataStore` / `SharedPreferencesNewDataStore` | 新 schema、并发保护和损坏数据降级；应用、场景与遥测独立于旧数据，`priority`/`enabled` 可保真持久化；尚缺正式场景事务的跨进程恢复 journal |
-| 任务与错误记录 | `core.logging.TaskLogStore` / `SharedPreferencesTaskLogStore` | 持久化并发保护，最多保留 500 条，记录预检、快照、执行与回滚结果；运行状态尚未形成页面内实时轨迹 |
+| 场景同源预演与事务 | `core.scene.SceneEngine.prepare` / `SceneEngine.apply` | `prepare` 与真实应用共用命令生成、白名单预检和快照逻辑，全程零写入；真实事务在首次写入前同步落盘完整恢复计划，每条命令先记 `WRITE_STARTED` 再执行，失败按逆序回滚 |
+| 全新数据层 | `core.data.NewDataStore` / `SharedPreferencesSceneTransactionJournalStore` | 应用、场景与遥测独立于旧数据；正式 journal 持久化场景、包名、后端、恢复命令和逐项阶段，损坏数据 fail-closed；新 store 实例恢复与损坏 journal 设备测试已覆盖 |
+| 任务与错误记录 | `core.logging.TaskLogStore` / `SharedPreferencesSceneTaskEventStore` | 审计日志与结构化事件分离，最多各保留 500 条；事件含 task/scene/app/backend/phase/sequence，并通过 SharedPreferences 观察实时接入总览与场景任务轨迹 |
 | 设备总览 | `feature.overview.OverviewPresenter` / `ui.OverviewScreen` | 聚合设备、应用/场景数、后端选择、Usage Stats/自动化服务和最近任务；可直达场景与调节任务 |
 | 应用列表 | `feature.apps.ApplicationCatalog` / `AppListController` / `ui.AppsScreen` | 查询真实安装应用并展示 PackageManager 图标、名称、包名、版本和应用类型；支持名称/包名、用户/系统、全部/已有场景/未配置筛选；点击时携带完整 `AppEntry` 进入工作台 |
 | 场景链路工作台 | `ui.ScenesScreen` / `ui.SceneChainComponents` | 已按“应用→意图→优先级→预演→启用”组织编辑链路；预演绑定当前不可变场景及后端，异步旧结果会作废；普通保存不能启用，审批入口再次校验报告一致性 |
 | 场景选择与生命周期 | `core.scene.SceneSelector` / `SceneActivationCoordinator` | 仅选择已启用场景并按包名/优先级决策；最高优先级并列时拒绝执行；同场景去重、切换前恢复、离场/停止/事件源失效恢复已实现 |
 | 前台事件源 | `core.scene.UsageStatsForegroundAppSource` | 通过 Usage Stats 只读获取前台包名；未授权时安全降级并阻止无效轮询 |
 | 场景轮询 | `core.scene.ScenePollingLoop` | 支持启动、停止和可配置间隔；每次有效采样都会协调一次，使同一前台应用下的停用/重新启用也能触发恢复或应用，协调器负责去重避免重复写入 |
-| 后台承载 | `core.scene.SceneTriggerService` / `SceneServiceStateStore` | `STOPPED/RUNNING/STOPPING/RECOVERY_REQUIRED` 跨 Activity 持久化；停止等待恢复终态，失败或超时保留高危日志并锁住后端；仍缺原始快照的跨进程 journal |
-| 场景快照与恢复 | `core.scene.SceneSnapshotManager` / `BrokerSceneRestoreExecutor` | Root/Shizuku 已使用特权只读模板建立 CPU governor/频率及 swappiness 快照；缺任一原值即零写入阻断，恢复按逆序执行；正式跨进程 journal 和真机真实写后恢复仍待完成 |
+| 后台承载 | `core.scene.SceneTriggerService` / `SceneServiceStateStore` | `STOPPED/RUNNING/STOPPING/RECOVERY_REQUIRED` 跨 Activity 持久化；启动发现未完成 journal 时先按原后端逆序恢复并保持自动化停止，失败/超时/损坏会记录高危事件并锁住后端 |
+| 场景快照与恢复 | `core.scene.SceneSnapshotManager` / `BrokerSceneRestoreExecutor` | Root/Shizuku 使用特权只读模板建立 CPU governor/频率及 swappiness 快照；正常恢复与重启恢复逐项持久化进度，重复恢复保持幂等；真机真实写后恢复仍待授权验收 |
 | CPU 手动调节 | `ui.TuningScreen` / `feature.tuning.CpuTuner` | 已有只读状态、设备可用 governor 约束、方案预览、原值快照、高风险确认、写后读回和失败恢复链路；dry-run/自动化已验证，真机真实写尚未执行 |
 | 内存与 ZRAM 手动调节 | `ui.TuningScreen` / `feature.tuning.MemoryTuner` | 已有内存/ZRAM 只读状态及 swappiness 的范围校验、预览、快照、确认、读回和恢复链路；ZRAM 重建继续关闭，swappiness 真机真实写尚未执行 |
-| FPS 当前窗口采集 | `feature.telemetry.WindowFpsCollector` / `FpsMonitor` / `ui.MonitorScreen` | Android 7+ 使用 FrameMetrics 按 1 秒窗口聚合并持久化；API 35 设备测试通过，API 23 明确显示不支持；仍不代表外部应用 FPS |
+| FPS 当前窗口采集 | `feature.telemetry.WindowFpsCollector` / `FpsMonitor` / `ui.MonitorScreen` | Android 7+ 使用 FrameMetrics 按 1 秒窗口聚合并持久化；API 35 模拟器测试通过，API 23 明确显示不支持；仍不代表外部应用 FPS |
 | FPS 分析与导出 | `feature.telemetry.FpsSessionAnalyzer` / `FpsCsvExporter` | 支持平均/极值/P95/jank、历史列表、摘要回看和 CSV 系统分享；外部应用采集不在当前实现内 |
 | 五栏 UI | `MainActivity` / `ui.QijingApp` | 五页已统一为 edge-to-edge、紧凑 Top App Bar、原生底部导航、分组列表与 Bottom Sheet；Hero/卡片流已退出普通信息层，场景链路、预演和会话图表继续使用专属边界；亮暗主题与 API 23/35 回归状态见已验证边界 |
 
@@ -35,14 +35,14 @@
 - 服务状态不再使用 Compose 临时布尔值；运行、停止恢复和恢复未确认状态在重建页面后保持一致，只有 `STOPPED` 能切换后端。
 - Root/Shizuku 已能通过特权 transport 读取快照，但尚未对真实 CPU 或 swappiness 执行写入、读回和恢复，因此不能标记为真机调节可用。
 - M4/M5 不再只是只读卡片：手动安全调节链路已经接入；ZRAM 重建仍明确关闭。
-- API 23/API 35 已完整运行设备 UI 测试；Root-only 条件跳过只说明模拟器没有 Root，不算失败，也不能作为 Root 写入证据。
+- API 23/API 35 模拟器各完成 10 项设备测试：9 通过、1 项 Root-only 条件跳过；JVM 78 项通过。模拟器条件跳过不能作为 Root 写入证据。
 
 ## 下一阶段完成定义
 
-当前剩余的发布关键链路集中在三项：
+当前代码侧的实时轨迹与正式跨进程 journal 已完成，剩余发布关键链路转为设备验收：
 
-1. 将预演、命中、快照、应用、读回、恢复和异常以实时状态轨迹接入场景工作台。
-2. 为正式场景事务持久化原始快照与未完成状态，完成进程被杀后的跨进程恢复 journal。
-3. 在明确授权的真机上逐项执行 Root/Shizuku 真实写入、读回、离场恢复、失败回滚和撤权测试。
+1. 在明确授权的真机上分别执行 Root 与 Shizuku 的真实写入、读回、离场恢复、失败回滚和撤权测试。
+2. 通过进程中断与部分恢复故障注入，人工核对总览/场景轨迹、通知和后端锁定是否一致。
+3. 完成长时 FPS 会话、TalkBack、200% 字体、深浅色与小屏人工走查。
 
 完成口径继续遵循 [后端与恢复验收标准](backend-acceptance.md) 与 [场景链路工作台规格](scene-chain-workbench.md)，不以 debug 模拟或模拟器通过替代真实硬件写入结论。

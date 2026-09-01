@@ -6,7 +6,7 @@
 
 ## 工程约定
 
-- Android/Kotlin，UI 使用 Jetpack Compose + Material 3，并通过自定义色彩、卡片和信息层级区别于旧版。
+- Android/Kotlin，UI 使用 Jetpack Compose + Material 3，并通过就绪状态、原生列表、场景链路、任务轨迹和会话图表建立独立操作语言。
 - C0-C5 是平台层；M1/M2/M3/M4/M5/M8 是第一版产品模块。
 - C3 是全新数据模型，不提供历史数据兼容层。
 - 每次可审阅的改动都更新 `CHANGELOG.md`，提交信息保持简短。
@@ -26,4 +26,4 @@
 ./gradlew :app:assembleDebug
 ```
 
-当前开发环境使用 JDK 17、Android SDK 35 与 Gradle 8.11.1；提交前运行 JVM 测试、AndroidTest 编译、lint 和 debug APK 构建。真实 Root/Shizuku 写入仍以真机验收记录为发布门槛。
+当前开发环境使用 JDK 17、Android SDK 35 与 Gradle 8.11.1；提交前运行 JVM 测试、AndroidTest 编译、lint 和 debug/release APK 构建。场景事务已具备结构化实时轨迹和正式跨进程恢复 journal；真实 Root/Shizuku 写入仍以逐项真机验收记录为发布门槛。

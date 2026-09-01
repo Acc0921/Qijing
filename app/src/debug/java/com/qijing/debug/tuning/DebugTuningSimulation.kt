@@ -3,6 +3,7 @@ package com.qijing.debug.tuning
 import com.qijing.core.execution.CapabilityCommand
 import com.qijing.core.execution.CommandValidator
 import com.qijing.core.execution.ExecutionBroker
+import com.qijing.core.execution.ExecutionBackendProvider
 import com.qijing.core.execution.ExecutionResult
 import com.qijing.core.execution.PrivilegedWriteCommandMapper
 import com.qijing.core.model.ExecutionBackend
@@ -126,7 +127,8 @@ class DebugTuningExecutionBroker(
     private val store: DebugTuningStateStore,
     private val failures: DebugFailureInjector = DebugFailureInjector(),
     private val events: DebugTuningEventRecorder = DebugTuningEventRecorder()
-) : ExecutionBroker, CommandValidator, CapabilityValueReader {
+) : ExecutionBroker, CommandValidator, CapabilityValueReader, ExecutionBackendProvider {
+    override val executionBackend: ExecutionBackend = ExecutionBackend.DRY_RUN
     private val mutex = Mutex()
     private var recoveryRequired = store.exclusive { store.loadJournal() is DebugJournalLoad.Loaded }
 
@@ -208,7 +210,7 @@ class DebugTuningExecutionBroker(
         if (finalJournal == null && appliedJournal != null && !store.commit(after, null)) {
             return@executeLocked ExecutionResult.Failed("SIM_STORE_WRITE_FAILED", "无法清除已恢复的模拟记录", command.rollback)
         }
-        ExecutionResult.Applied(ExecutionBackend.DAEMON, "simulated:${command.capability}=$actual")
+        ExecutionResult.Applied(ExecutionBackend.DRY_RUN, "simulated:${command.capability}=$actual")
         }
     }
 

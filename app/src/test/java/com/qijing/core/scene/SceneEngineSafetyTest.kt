@@ -3,8 +3,10 @@ package com.qijing.core.scene
 import com.qijing.core.execution.CapabilityCommand
 import com.qijing.core.execution.CommandValidator
 import com.qijing.core.execution.ExecutionBroker
+import com.qijing.core.execution.ExecutionBackendProvider
 import com.qijing.core.execution.ExecutionResult
 import com.qijing.core.execution.DryRunExecutionBroker
+import com.qijing.core.execution.RequiresRollbackSnapshot
 import com.qijing.core.execution.RootExecutionBroker
 import com.qijing.core.logging.InMemoryTaskLogStore
 import com.qijing.core.model.CpuIntent
@@ -39,7 +41,8 @@ class SceneEngineSafetyTest {
 
     @Test fun `failed command attempts its own restore for partial write safety`() = runBlocking {
         val calls = mutableListOf<String>()
-        val broker = object : ExecutionBroker, CommandValidator {
+        val broker = object : ExecutionBroker, CommandValidator, ExecutionBackendProvider, RequiresRollbackSnapshot {
+            override val executionBackend = ExecutionBackend.ROOT
             override fun validate(command: CapabilityCommand): ExecutionResult? = null
             override suspend fun execute(command: CapabilityCommand): ExecutionResult {
                 calls += command.capability
@@ -50,7 +53,12 @@ class SceneEngineSafetyTest {
         val snapshots = SceneSnapshotManager(object : CapabilityValueReader {
             override suspend fun read(capability: String): String = "schedutil"
         })
-        val result = SceneEngine(broker, InMemoryTaskLogStore(), snapshots).apply(scene)
+        val result = SceneEngine(
+            broker,
+            InMemoryTaskLogStore(),
+            snapshots,
+            InMemorySceneTransactionJournalStore()
+        ).apply(scene)
         assertEquals(listOf("cpu.governor.set", "cpu.governor.set.restore"), calls)
         assertTrue(result.rolledBack)
     }
@@ -100,13 +108,17 @@ class SceneEngineSafetyTest {
 
     @Test fun `dry run log says preview and never claims applied`() = runBlocking {
         val logs = InMemoryTaskLogStore()
-        val result = SceneEngine(DryRunExecutionBroker(), logs).apply(scene)
+        val events = InMemorySceneTaskEventStore()
+        val result = SceneEngine(DryRunExecutionBroker(), logs, events = events).apply(scene)
 
         assertNull(result.failure)
         val log = logs.recent().single()
         assertTrue(log.stage.startsWith("preview:"))
         assertTrue(log.message.contains("未修改系统"))
         assertFalse(log.message.contains("Applied"))
+        assertEquals(SceneTaskPhase.PREVIEWED, events.recent().last().phase)
+        assertFalse(events.recent().any { it.phase == SceneTaskPhase.ACTIVE || it.phase == SceneTaskPhase.RESTORED })
+        assertTrue(events.recent().last().detail.contains("无需恢复"))
     }
 
     @Test fun `empty scene is rejected instead of succeeding without work`() = runBlocking {
@@ -129,6 +141,44 @@ class SceneEngineSafetyTest {
 
         assertEquals("SNAPSHOT_UNAVAILABLE", (result.failure as ExecutionResult.Failed).code)
         assertEquals(0, transportCalls)
+    }
+
+    @Test fun `real scene execution without durable journal is rejected before transport`() = runBlocking {
+        val broker = object : ExecutionBroker, ExecutionBackendProvider, CommandValidator, RequiresRollbackSnapshot {
+            override val executionBackend = ExecutionBackend.ROOT
+            var calls = 0
+            override fun validate(command: CapabilityCommand): ExecutionResult? = null
+            override suspend fun execute(command: CapabilityCommand): ExecutionResult {
+                calls += 1
+                return ExecutionResult.Applied(ExecutionBackend.ROOT)
+            }
+        }
+        val engine = SceneEngine(
+            broker,
+            InMemoryTaskLogStore(),
+            SceneSnapshotManager(CapabilityValueReader { "schedutil" })
+        )
+
+        val result = engine.apply(scene)
+
+        assertEquals("JOURNAL_NOT_READY", (result.failure as ExecutionResult.Failed).code)
+        assertEquals(0, broker.calls)
+    }
+
+    @Test fun `broker without declared identity is rejected before transport`() = runBlocking {
+        var calls = 0
+        val broker = object : ExecutionBroker, CommandValidator {
+            override fun validate(command: CapabilityCommand): ExecutionResult? = null
+            override suspend fun execute(command: CapabilityCommand): ExecutionResult {
+                calls += 1
+                return ExecutionResult.Applied(ExecutionBackend.DRY_RUN)
+            }
+        }
+
+        val result = SceneEngine(broker, InMemoryTaskLogStore()).apply(scene)
+
+        assertEquals("BACKEND_UNDECLARED", (result.failure as ExecutionResult.Failed).code)
+        assertEquals(0, calls)
     }
 
     private class RecordingValidatingBroker(private val validation: ExecutionResult?) : ExecutionBroker, CommandValidator {

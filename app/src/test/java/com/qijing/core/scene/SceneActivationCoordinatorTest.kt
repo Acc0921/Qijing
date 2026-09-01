@@ -2,6 +2,7 @@ package com.qijing.core.scene
 
 import com.qijing.core.execution.DryRunExecutionBroker
 import com.qijing.core.execution.ExecutionBroker
+import com.qijing.core.execution.ExecutionBackendProvider
 import com.qijing.core.execution.ExecutionResult
 import com.qijing.core.logging.InMemoryTaskLogStore
 import com.qijing.core.model.CpuIntent
@@ -71,7 +72,8 @@ class SceneActivationCoordinatorTest {
     @Test fun `switch restores previous scene before activating next`() = runBlocking {
         val events = mutableListOf<String>()
         val restore = RecordingRestoreExecutor(events = events)
-        val broker = object : ExecutionBroker {
+        val broker = object : ExecutionBroker, ExecutionBackendProvider {
+            override val executionBackend = ExecutionBackend.DRY_RUN
             override suspend fun execute(command: com.qijing.core.execution.CapabilityCommand): ExecutionResult {
                 events += "apply-${command.arguments["value"]}"
                 return ExecutionResult.Applied(ExecutionBackend.DRY_RUN)
@@ -100,6 +102,16 @@ class SceneActivationCoordinatorTest {
         assertTrue(result is SceneLifecycleResult.RestoreFailed)
         assertEquals("restore_denied", (result as SceneLifecycleResult.RestoreFailed).restore.failure.let { it as ExecutionResult.Failed }.code)
         assertEquals("game", coordinator.activeScene?.scene?.id)
+    }
+
+    @Test fun `preview leave reports no system restore`() = runBlocking {
+        val transaction = SceneEngine(DryRunExecutionBroker(), InMemoryTaskLogStore()).apply(game)
+
+        val restore = SceneRestoreExecutor.Preview.restore(ActiveScene(game, transaction))
+
+        assertEquals(0, restore.attemptedCommands)
+        assertEquals(0, restore.restoredCommands)
+        assertTrue(restore.succeeded)
     }
 
     private fun coordinator(restore: SceneRestoreExecutor) = SceneActivationCoordinator(

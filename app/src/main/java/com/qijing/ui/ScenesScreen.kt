@@ -29,6 +29,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +59,7 @@ import com.qijing.core.scene.CapabilityValueReader
 import com.qijing.core.scene.SceneEngine
 import com.qijing.core.scene.ScenePreparation
 import com.qijing.core.scene.SceneSnapshotManager
+import com.qijing.core.scene.SharedPreferencesSceneTaskEventStore
 import com.qijing.feature.scene.SceneDraft
 import com.qijing.feature.scene.SceneDraftStore
 import com.qijing.feature.tuning.CpuStatusReader
@@ -83,6 +85,7 @@ internal fun ScenesScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val sceneStore = remember(store) { SceneDraftStore(store) }
+    val taskEventStore = remember(context) { SharedPreferencesSceneTaskEventStore(context) }
     val backend = remember(context) { BackendPreference(context).selected() }
     var scenes by remember(store) { mutableStateOf(sceneStore.load()) }
     var targetApp by remember { mutableStateOf<AppEntry?>(initialApp) }
@@ -96,6 +99,12 @@ internal fun ScenesScreen(
     var showEnableConfirmation by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
     var messageError by remember { mutableStateOf(false) }
+    var taskEvents by remember { mutableStateOf(taskEventStore.recent(80)) }
+
+    DisposableEffect(taskEventStore) {
+        val observation = taskEventStore.observe(80) { taskEvents = it }
+        onDispose { observation.close() }
+    }
 
     fun invalidatePreparation() {
         preparationRequestId += 1
@@ -146,6 +155,15 @@ internal fun ScenesScreen(
                     }
                 }
             )
+        }
+
+        if (taskEvents.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    PageSectionHeader("最近自动任务", "命中、验证与恢复来自同一事务")
+                    SceneTaskTrail(taskEvents, Modifier.padding(top = 6.dp))
+                }
+            }
         }
 
         if (editorOpen) {

@@ -13,13 +13,23 @@ import com.qijing.core.logging.TaskLogStore
 import com.qijing.core.model.SceneProfile
 import java.util.UUID
 
-class SceneEngine(private val broker: ExecutionBroker, private val logs: TaskLogStore, private val snapshots: SceneSnapshotManager? = null) {
+class SceneEngine(
+    private val broker: ExecutionBroker,
+    private val logs: TaskLogStore,
+    private val snapshots: SceneSnapshotManager? = null,
+    private val journalStore: SceneTransactionJournalStore? = null,
+    private val events: SceneTaskEventStore? = null
+) {
     /** Builds and validates a plan without performing any writes. */
-    suspend fun prepare(scene: SceneProfile, recordFailureLog: Boolean = true): ScenePreparation {
+    suspend fun prepare(
+        scene: SceneProfile,
+        recordFailureLog: Boolean = true,
+        taskId: String = UUID.randomUUID().toString()
+    ): ScenePreparation {
         val rawCommands = buildCommands(scene)
         val backend = (broker as? ExecutionBackendProvider)?.executionBackend
-        val taskId = UUID.randomUUID().toString()
         val rawPlan = CommandPlan(taskId, rawCommands)
+        if (recordFailureLog) recordEvent(scene, taskId, backend, SceneTaskPhase.PREFLIGHT, "检查能力白名单、参数和恢复条件")
         if (rawCommands.isEmpty()) {
             val failure = ExecutionResult.Failed("SCENE_NO_WRITABLE_INTENT", "场景没有可执行的调节目标，未执行任何写入")
             recordPreparationFailure(taskId, "preflight", failure, recordFailureLog)
@@ -50,17 +60,79 @@ class SceneEngine(private val broker: ExecutionBroker, private val logs: TaskLog
                 return ScenePreparation(scene, backend, plan, snapshot, failure)
             }
         }
+        if (recordFailureLog && snapshot != null) {
+            recordEvent(scene, taskId, backend, SceneTaskPhase.SNAPSHOT, "原值快照与恢复命令已生成")
+        }
         return ScenePreparation(scene, backend, plan, snapshot)
     }
 
-    suspend fun apply(scene: SceneProfile): TransactionResult {
+    suspend fun apply(scene: SceneProfile, matchDetail: String = "前台应用命中场景"): TransactionResult {
         // Always prepare again at execution time so a UI preview can never supply a stale snapshot.
-        val preparation = prepare(scene, recordFailureLog = true)
-        preparation.failure?.let { return TransactionResult(preparation.plan, emptyList(), it) }
+        val taskId = UUID.randomUUID().toString()
+        val reportedBackend = (broker as? ExecutionBackendProvider)?.executionBackend
+        recordEvent(scene, taskId, reportedBackend, SceneTaskPhase.MATCHED, matchDetail)
+        val preparation = prepare(scene, recordFailureLog = true, taskId = taskId)
+        preparation.failure?.let {
+            recordEvent(scene, taskId, preparation.backend, SceneTaskPhase.FAILED, it.toString())
+            return TransactionResult(preparation.plan, emptyList(), it)
+        }
         val plan = preparation.plan
-        val appliedCommands = mutableListOf<Pair<CapabilityCommand, ExecutionResult.Applied>>()
-        for (command in plan.commands) {
-            val result = broker.execute(command)
+        val backend = preparation.backend
+        if (backend == null) {
+            val failure = ExecutionResult.Failed("BACKEND_UNDECLARED", "执行后端未声明身份，已阻止首条命令")
+            recordEvent(scene, plan.id, null, SceneTaskPhase.FAILED, failure.message)
+            return TransactionResult(plan, emptyList(), failure)
+        }
+        if (backend !in setOf(
+                com.qijing.core.model.ExecutionBackend.DRY_RUN,
+                com.qijing.core.model.ExecutionBackend.ROOT,
+                com.qijing.core.model.ExecutionBackend.SHIZUKU
+            )) {
+            val failure = ExecutionResult.Failed("BACKEND_NOT_ALLOWED", "场景执行不允许使用 $backend 后端")
+            recordEvent(scene, plan.id, backend, SceneTaskPhase.FAILED, failure.message)
+            return TransactionResult(plan, emptyList(), failure)
+        }
+        val journalSession = if (backend in setOf(
+                com.qijing.core.model.ExecutionBackend.ROOT,
+                com.qijing.core.model.ExecutionBackend.SHIZUKU
+            )) {
+            val durableStore = journalStore ?: run {
+                val failure = ExecutionResult.Failed("JOURNAL_NOT_READY", "真实执行缺少持久化恢复 journal，未执行任何写入")
+                recordEvent(scene, plan.id, backend, SceneTaskPhase.FAILED, failure.message)
+                return TransactionResult(plan, emptyList(), failure)
+            }
+            val session = SceneJournalSession.open(durableStore, scene, plan, backend!!)
+            if (session == null) {
+                val failure = ExecutionResult.Failed("JOURNAL_NOT_READY", "无法在写入前持久化恢复 journal，未执行任何写入")
+                recordEvent(scene, plan.id, backend, SceneTaskPhase.FAILED, failure.message)
+                return TransactionResult(plan, emptyList(), failure)
+            }
+            session
+        } else null
+        val appliedCommands = mutableListOf<Triple<Int, CapabilityCommand, ExecutionResult.Applied>>()
+        for ((index, command) in plan.commands.withIndex()) {
+            if (journalSession != null && !journalSession.markWriteStarted(index)) {
+                val failure = ExecutionResult.Failed("JOURNAL_WRITE_FAILED", "无法保存写入前状态，已阻止后续写入")
+                val rolledBack = rollbackApplied(plan.id, appliedCommands, journalSession)
+                val recoveryClosed = rolledBack && journalSession.clear()
+                recordEvent(
+                    scene,
+                    plan.id,
+                    backend,
+                    if (recoveryClosed) SceneTaskPhase.RESTORED else SceneTaskPhase.RECOVERY_REQUIRED,
+                    if (recoveryClosed) "写入前状态保存失败；已恢复先前写入并关闭 journal" else "写入前状态保存失败；恢复或 journal 清理未完成"
+                )
+                return TransactionResult(plan, appliedCommands.map { it.third }, failure, recoveryClosed)
+            }
+            recordEvent(scene, plan.id, backend, SceneTaskPhase.APPLYING, "${index + 1}/${plan.commands.size} · ${command.capability}")
+            val reportedResult = broker.execute(command)
+            val result = if (reportedResult is ExecutionResult.Applied && reportedResult.backend != backend) {
+                ExecutionResult.Failed(
+                    "EXECUTION_BACKEND_MISMATCH",
+                    "执行结果后端为 ${reportedResult.backend}，预期 $backend",
+                    command.rollback
+                )
+            } else reportedResult
             val previewed = result is ExecutionResult.Applied && result.backend == com.qijing.core.model.ExecutionBackend.DRY_RUN
             logs.append(
                 TaskLog(
@@ -72,26 +144,111 @@ class SceneEngine(private val broker: ExecutionBroker, private val logs: TaskLog
                 )
             )
             if (result is ExecutionResult.Applied) {
-                appliedCommands += command to result
+                appliedCommands += Triple(index, command, result)
+                recordEvent(
+                    scene,
+                    plan.id,
+                    backend,
+                    if (previewed) SceneTaskPhase.PREVIEWED else SceneTaskPhase.VERIFIED,
+                    if (previewed) "${command.capability} 仅完成预演" else "${command.capability} 写后读回一致"
+                )
+                if (journalSession != null && !journalSession.markApplied(index)) {
+                    val failure = ExecutionResult.Failed("JOURNAL_PROGRESS_FAILED", "写入完成但无法保存 journal 进度，立即尝试恢复")
+                    val rolledBack = rollbackApplied(plan.id, appliedCommands, journalSession)
+                    val recoveryClosed = rolledBack && journalSession.clear()
+                    recordEvent(
+                        scene,
+                        plan.id,
+                        backend,
+                        if (recoveryClosed) SceneTaskPhase.RESTORED else SceneTaskPhase.RECOVERY_REQUIRED,
+                        if (recoveryClosed) "journal 进度保存失败；已恢复原值并关闭 journal" else failure.message
+                    )
+                    return TransactionResult(plan, appliedCommands.map { it.third }, failure, recoveryClosed)
+                }
                 continue
             }
+            recordEvent(scene, plan.id, backend, SceneTaskPhase.FAILED, result.toString())
             var rolledBack = true
             var rollbackAttempted = false
-            val rollbackCommands = buildList {
-                command.rollback?.let(::add)
-                appliedCommands.asReversed().mapNotNullTo(this) { (appliedCommand, _) -> appliedCommand.rollback }
+            val rollbackCommands = buildList<Pair<Int, CapabilityCommand>> {
+                command.rollback?.let { add(index to it) }
+                appliedCommands.asReversed().mapNotNullTo(this) { (appliedIndex, appliedCommand, _) ->
+                    appliedCommand.rollback?.let { appliedIndex to it }
+                }
             }
             if (command.rollback == null || rollbackCommands.size < appliedCommands.size + 1) rolledBack = false
-            rollbackCommands.forEach { rollback ->
+            rollbackCommands.forEach { (rollbackIndex, rollback) ->
                 rollbackAttempted = true
                 val rollbackResult = broker.execute(rollback)
-                val ok = rollbackResult is ExecutionResult.Applied
+                val backendMatches = rollbackResult is ExecutionResult.Applied && rollbackResult.backend == backend
+                val progressSaved = !backendMatches || journalSession == null || journalSession.markRestored(rollbackIndex)
+                val ok = backendMatches && progressSaved
                 rolledBack = rolledBack && ok
                 logs.append(TaskLog(plan.id, "rollback:${rollback.capability}", rollbackResult.toString(), ok, System.currentTimeMillis()))
             }
-            return TransactionResult(plan, appliedCommands.map { it.second }, result, rolledBack && (rollbackAttempted || appliedCommands.isEmpty()))
+            val completedRollback = rolledBack && (rollbackAttempted || appliedCommands.isEmpty())
+            val recoveryClosed = completedRollback && (journalSession?.clear() ?: true)
+            if (recoveryClosed) {
+                recordEvent(scene, plan.id, backend, SceneTaskPhase.RESTORED, "执行失败后已恢复原值")
+            } else {
+                recordEvent(scene, plan.id, backend, SceneTaskPhase.RECOVERY_REQUIRED, "执行失败，恢复或 journal 清理不完整")
+            }
+            return TransactionResult(plan, appliedCommands.map { it.third }, result, recoveryClosed)
         }
-        return TransactionResult(plan, appliedCommands.map { it.second })
+        val previewOnly = appliedCommands.isNotEmpty() && appliedCommands.all {
+            it.third.backend == com.qijing.core.model.ExecutionBackend.DRY_RUN
+        }
+        recordEvent(
+            scene,
+            plan.id,
+            backend,
+            if (previewOnly) SceneTaskPhase.PREVIEWED else SceneTaskPhase.ACTIVE,
+            if (previewOnly) "预览命中完成，系统未修改，无需恢复" else "场景已验证生效，等待离场恢复"
+        )
+        return TransactionResult(plan, appliedCommands.map { it.third })
+    }
+
+    private suspend fun rollbackApplied(
+        taskId: String,
+        appliedCommands: List<Triple<Int, CapabilityCommand, ExecutionResult.Applied>>,
+        journalSession: SceneJournalSession?
+    ): Boolean {
+        var complete = true
+        appliedCommands.asReversed().forEach { (index, command, _) ->
+            val rollback = command.rollback
+            if (rollback == null) {
+                complete = false
+                return@forEach
+            }
+            val result = broker.execute(rollback)
+            val expectedBackend = appliedCommands.firstOrNull()?.third?.backend
+            val backendMatches = result is ExecutionResult.Applied && result.backend == expectedBackend
+            val progressSaved = !backendMatches || journalSession == null || journalSession.markRestored(index)
+            val ok = backendMatches && progressSaved
+            complete = complete && ok
+            logs.append(TaskLog(taskId, "rollback:${rollback.capability}", result.toString(), ok, System.currentTimeMillis()))
+        }
+        return complete
+    }
+
+    private fun recordEvent(
+        scene: SceneProfile,
+        taskId: String,
+        backend: com.qijing.core.model.ExecutionBackend?,
+        phase: SceneTaskPhase,
+        detail: String
+    ) {
+        events?.append(
+            SceneTaskEvent(
+                taskId = taskId,
+                sceneId = scene.id,
+                sceneName = scene.name,
+                packageName = scene.packageNames.firstOrNull(),
+                backend = backend,
+                phase = phase,
+                detail = detail
+            )
+        )
     }
 
     private fun recordPreparationFailure(

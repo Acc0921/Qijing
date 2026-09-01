@@ -22,7 +22,8 @@ class SceneActivationCoordinator(
 
     suspend fun onForeground(packageName: String, scenes: Iterable<SceneProfile>): SceneLifecycleResult =
         transitionMutex.withLock {
-            val selected = selector.select(scenes, SceneTriggerEvent.ForegroundApp(packageName)).scene
+            val selection = selector.select(scenes, SceneTriggerEvent.ForegroundApp(packageName))
+            val selected = selection.scene
             val previous = current
 
             if (selected == null) return@withLock restoreOrIdle(packageName, previous)
@@ -34,7 +35,7 @@ class SceneActivationCoordinator(
                     return@withLock SceneLifecycleResult.RestoreFailed(previous, selected, restore)
                 }
                 current = null
-                val transaction = engine.apply(selected)
+                val transaction = engine.apply(selected, selection.reason)
                 if (transaction.failure != null) {
                     return@withLock SceneLifecycleResult.SwitchActivationFailed(previous, selected, restore, transaction)
                 }
@@ -43,7 +44,7 @@ class SceneActivationCoordinator(
                 return@withLock SceneLifecycleResult.Switched(previous, active, restore)
             }
 
-            val transaction = engine.apply(selected)
+            val transaction = engine.apply(selected, selection.reason)
             if (transaction.failure != null) {
                 return@withLock SceneLifecycleResult.ActivationFailed(selected, transaction)
             }

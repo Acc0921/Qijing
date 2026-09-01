@@ -63,6 +63,7 @@ import com.qijing.core.model.ExecutionBackend
 import com.qijing.core.scene.SceneServicePhase
 import com.qijing.core.scene.SceneServiceStateStore
 import com.qijing.core.scene.SceneTriggerService
+import com.qijing.core.scene.SharedPreferencesSceneTaskEventStore
 import com.qijing.core.scene.UsageStatsForegroundAppSource
 import com.qijing.feature.overview.OverviewPresenter
 import java.text.SimpleDateFormat
@@ -74,8 +75,15 @@ internal fun OverviewScreen(store: NewDataStore, onOpenScenes: () -> Unit, onOpe
     val context = LocalContext.current
     val overview = remember(store) { OverviewPresenter(AndroidDeviceCapabilityProbe(), store).load() }
     val logsStore = remember(context) { SharedPreferencesTaskLogStore(context) }
+    val taskEventStore = remember(context) { SharedPreferencesSceneTaskEventStore(context) }
     var logs by remember { mutableStateOf(logsStore.recent(4)) }
+    var taskEvents by remember { mutableStateOf(taskEventStore.recent(80)) }
     val device = overview.device
+
+    DisposableEffect(taskEventStore) {
+        val observation = taskEventStore.observe(80) { taskEvents = it }
+        onDispose { observation.close() }
+    }
 
     LazyColumn(
         modifier = Modifier.testTag("home"),
@@ -94,6 +102,15 @@ internal fun OverviewScreen(store: NewDataStore, onOpenScenes: () -> Unit, onOpe
         }
 
         item { AutomationControlSection() }
+
+        if (taskEvents.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    OverviewPageSection("当前任务")
+                    SceneTaskTrail(taskEvents)
+                }
+            }
+        }
 
         item { OverviewPageSection("当前设备") }
         item {

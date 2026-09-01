@@ -4,7 +4,7 @@
 
 | 编号 | 模块 | 第一版职责 |
 | --- | --- | --- |
-| C0 | 特权执行层 | 统一 root、ADB、Shizuku、daemon 后端；结构化返回 supported/applied/failed/rollback。 |
+| C0 | 特权执行层 | 统一 dry-run、Root、Shizuku 与只读 ADB 契约；结构化返回 supported/applied/failed/rollback。daemon 不进入第一版。 |
 | C1 | 场景引擎 | 场景定义、触发、优先级、应用与恢复事务。 |
 | C2 | 设备能力探测 | 探测 Android 版本、SoC、厂商、可写路径和可用后端。 |
 | C3 | 全新数据层 | 仅保存新版本设备、应用、场景、调节配置和遥测数据；不迁移旧表。 |
@@ -15,16 +15,16 @@
 
 | 编号 | 模块 | 第一版职责 |
 | --- | --- | --- |
-| M1 | 设备总览 | 展示设备能力、当前后端、CPU/内存/ZRAM/FPS 摘要。 |
+| M1 | 设备总览 | 展示设备就绪状态、权限、当前后端、自动化、CPU/内存/ZRAM 只读摘要与场景任务轨迹。FPS 会话留在监控页。 |
 | M2 | 应用列表 | 查询、筛选应用，进入应用场景配置。 |
 | M3 | 应用场景 | 用户配置和编排入口；负责选择“何时应用哪套配置”。 |
-| M4 | CPU 调节 | governor、频率上下限、核心在线状态等具体执行能力。 |
-| M5 | 内存与 ZRAM | ZRAM 状态、压缩算法、容量、swappiness 和安全回滚。 |
+| M4 | CPU 调节 | governor、频率上下限与核心在线状态观察；第一版真实写入只开放 governor 和频率，核心上下线关闭。 |
+| M5 | 内存与 ZRAM | ZRAM 状态/算法/容量只读展示；仅 swappiness 开放预演、验证和安全回滚，ZRAM 重建关闭。 |
 | M8 | FPS 监控 | session 采集 FPS、frame time、jank，并提供摘要。 |
 
 ## 明确移除
 
-第一版不包含历史数据迁移、电池/充电调节、显示调节、OTA、温控移除、在线脚本商店、云端账户和 Magisk/Xposed 商店。
+第一版不包含历史数据迁移、电池/充电调节、显示调节、OTA、温控移除、在线脚本商店、云端账户、Magisk/Xposed 商店、daemon、CPU 核心上下线写入、ZRAM 重建和外部应用 FPS。
 
 ## 调节归属
 
