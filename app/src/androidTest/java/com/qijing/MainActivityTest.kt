@@ -14,6 +14,8 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.semantics.SemanticsActions
+import com.qijing.core.logging.SharedPreferencesTaskLogStore
+import com.qijing.core.logging.TaskLog
 import org.junit.Rule
 import org.junit.Test
 
@@ -85,6 +87,25 @@ class MainActivityTest {
         composeRule.runOnUiThread { composeRule.activity.onBackPressedDispatcher.onBackPressed() }
         composeRule.onNodeWithTag("scene-editor").assertDoesNotExist()
         composeRule.onNodeWithText("继续未完成的场景").assertIsDisplayed()
+    }
+
+    @Test
+    fun overviewTaskHistoryUsesUserFacingLanguage() {
+        SharedPreferencesTaskLogStore(composeRule.activity).append(
+            TaskLog(
+                taskId = "ui-task-history",
+                stage = "preview:cpu.policy.4.governor.set",
+                message = "预演完成，未修改系统",
+                success = true,
+                timestampMs = System.currentTimeMillis()
+            )
+        )
+        composeRule.activityRule.scenario.recreate()
+
+        composeRule.onNodeWithTag("task-history-open").performClick()
+        composeRule.onNodeWithTag("task-history-sheet").assertIsDisplayed()
+        composeRule.onNodeWithText("CPU 策略域 4 · Governor · 预演").assertIsDisplayed()
+        composeRule.onNodeWithText("已预演").assertIsDisplayed()
     }
 
     @Test

@@ -12,10 +12,10 @@
 | 设备能力探测 | `core.device.DeviceCapabilityProbe` / `core.device.observation` / `BackendDetector` / `PrivilegedReadCommandMapper` | 探测每个 CPU 核心与 policy、GPU、RAM、Swap、多 ZRAM 设备、电池电流/电压/温度/功率和后端状态；无法读取时区分未公开、权限不足、无效与采样中。Root/Shizuku 可通过固定模板获取写入前原值，真实设备可写性仍以逐项执行验收为准 |
 | 场景同源预演与事务 | `core.scene.SceneEngine.prepare` / `SceneEngine.apply` | `prepare` 与真实应用共用命令生成、白名单预检和快照逻辑，全程零写入；真实事务在首次写入前同步落盘完整恢复计划，每条命令先记 `WRITE_STARTED` 再执行，失败按逆序回滚 |
 | 全新数据层 | `core.data.NewDataStore` / `SharedPreferencesSceneTransactionJournalStore` | 应用、场景与遥测独立于旧数据；高频遥测采用追加式会话文件并摊销压缩，避免每秒重写完整历史；正式 journal 持久化场景、包名、后端、恢复命令和逐项阶段，损坏数据 fail-closed |
-| 任务与错误记录 | `core.logging.TaskLogStore` / `SharedPreferencesSceneTaskEventStore` | 审计日志与结构化事件分离，最多各保留 500 条；事件含 task/scene/app/backend/phase/sequence，并通过 SharedPreferences 观察实时接入总览与场景任务轨迹 |
-| 设备总览 | `feature.overview.OverviewPresenter` / `ui.OverviewScreen` | 聚合设备、应用/场景数、后端选择、Usage Stats/自动化服务和最近任务；可直达场景与调节任务 |
+| 任务与错误记录 | `core.logging.TaskLogStore` / `TaskLogPresentation` / `SharedPreferencesSceneTaskEventStore` | 审计日志与结构化事件分离，最多各保留 500 条；内部能力标识保留为证据，界面转换为用户可读的预演、验证、恢复与异常语言，并可从总览直接打开完整任务记录 |
+| 设备总览 | `feature.overview.OverviewPresenter` / `ui.OverviewScreen` | 聚合设备、应用/场景数、后端选择、Usage Stats/自动化服务和最近任务；Usage Stats 首次检查具有独立加载态，避免未确认前显示错误授权结论 |
 | 应用列表 | `feature.apps.ApplicationCatalog` / `AppListController` / `ui.AppsScreen` | 查询真实安装应用并展示 PackageManager 图标、名称、包名、版本和应用类型；默认显示有桌面入口的触发对象，内部包位于专家范围且标明资格未知；扫描与图标解码在后台线程完成 |
-| 场景链路工作台 | `ui.SceneEditorViewModel` / `ui.ScenesScreen` / `ui.SceneChainComponents` | 已按“应用→意图→优先级→预演→启用”组织编辑链路；草稿由 ViewModel/SavedStateHandle 保存，栏目切换、系统返回和进程重建不再静默丢失；预演绑定当前不可变场景及后端且不会跨重建复用 |
+| 场景链路工作台 | `ui.SceneEditorViewModel` / `SharedPreferencesSceneEditorStateStore` / `ui.ScenesScreen` / `ui.SceneChainComponents` | 已按“应用→意图→优先级→预演→启用”组织编辑链路；SavedStateHandle 与独立新版本草稿存储共同保留可编辑输入，栏目切换、系统返回、进程重建和用户强停后均可继续；能力探测与预演结果从不持久化，恢复后必须重新预演 |
 | 场景选择与生命周期 | `core.scene.SceneSelector` / `SceneActivationCoordinator` | 仅选择已启用场景并按包名/优先级决策；最高优先级并列时拒绝执行；同场景去重、切换前恢复、离场/停止/事件源失效恢复已实现 |
 | 前台事件源 | `core.scene.UsageStatsForegroundAppSource` | 通过 Usage Stats 只读获取前台包名；未授权时安全降级并阻止无效轮询 |
 | 场景轮询 | `core.scene.ScenePollingLoop` | 支持启动、停止和可配置间隔；每次有效采样都会协调一次，使同一前台应用下的停用/重新启用也能触发恢复或应用，协调器负责去重避免重复写入 |
@@ -25,7 +25,7 @@
 | CPU 手动调节与观察 | `ui.TuningScreen` / `core.device.observation.CpuObservationReader` | 展示逐 policy Governor/当前与硬件频率范围、关联核心，并展示每核频率、在线状态与负载；点击 policy 可从设备实际候选中自定义 Governor 与频率范围，再经过预览、快照、高风险确认、写后读回和失败恢复；真机真实写尚未执行 |
 | GPU 只读观察 | `core.device.observation.GpuObservationReader` / `ui.TuningScreen` | 识别 KGSL、Mali 和通用 devfreq 固定节点，展示当前/范围频率、负载与 Governor；无可识别节点或无权限时明确降级，不开放 GPU 写入 |
 | 内存、ZRAM 与功耗 | `core.device.observation.MemoryObservationReader` / `BatteryObservationReader` / `ui.TuningScreen` | 展示 RAM、Swap、全部 ZRAM 设备、压缩数据/内存占用/算法，以及电池电流、电压、温度和电池侧瞬时或估算功率；swappiness 具备范围校验、预览、快照、确认、读回和恢复链路。ZRAM 重建继续关闭，功率不冒充 CPU/GPU 分项数据 |
-| FPS 当前窗口采集 | `feature.telemetry.WindowFpsCollector` / `FpsMonitor` / `ui.MonitorScreen` | Android 7+ 使用 FrameMetrics；FPS 以单调时钟真实经过时间计算，每个窗口批量保存逐帧耗时；API 23 明确显示不支持，且始终不代表外部应用 FPS |
+| FPS 当前窗口采集 | `feature.telemetry.WindowFpsCollector` / `FpsMonitor` / `ui.MonitorScreen` | Android 7+ 使用 FrameMetrics；渲染 FPS 以单调时钟真实经过时间计算，每个窗口批量保存逐帧耗时；界面明确静止窗口低渲染频率不等于卡顿，并引导结合帧耗时/P95 判断；API 23 明确显示不支持，且始终不代表外部应用 FPS |
 | FPS 分析与导出 | `feature.telemetry.FpsSessionAnalyzer` / `FpsCsvExporter` | 新会话使用逐帧分布计算真实 P95；旧窗口级数据明确显示为“P95 窗口均值”；支持平均/极值/jank、历史、摘要和 CSV 系统分享 |
 | 五栏 UI | `MainActivity` / `ui.QijingApp` | 五页使用 Navigation Compose 返回栈、edge-to-edge、紧凑 Top App Bar、原生底部导航、分组列表与 Bottom Sheet；系统返回与对象编辑层级已进入自动化回归 |
 
@@ -37,7 +37,7 @@
 - 服务状态不再使用 Compose 临时布尔值；运行、停止恢复和恢复未确认状态在重建页面后保持一致，只有 `STOPPED` 能切换后端。
 - Root/Shizuku 已能通过特权 transport 读取快照，但尚未对真实 CPU 或 swappiness 执行写入、读回和恢复，因此不能标记为真机调节可用。
 - M4/M5 已补齐全局四档模式、逐 policy 自定义、第三方固定调度契约、每核 CPU/GPU/内存/ZRAM/电池侧功耗观察与手动安全调节；ZRAM、GPU 与核心上下线写入仍明确关闭。
-- API 23/API 35 模拟器均完成 13 项设备测试且 0 失败，Root-only 用例按设备条件跳过；JVM 108 项通过，Lint 0 error，Debug/Release 构建通过。模拟器条件跳过不能作为 Root 写入证据。
+- API 23/API 35 模拟器均完成 15 项设备测试且 0 失败，Root-only 用例按设备条件跳过；JVM 112 项通过。模拟器条件跳过不能作为 Root 写入证据。
 
 ## 下一阶段完成定义
 

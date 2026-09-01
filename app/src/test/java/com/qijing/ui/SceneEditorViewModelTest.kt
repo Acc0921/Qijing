@@ -2,6 +2,7 @@ package com.qijing.ui
 
 import androidx.lifecycle.SavedStateHandle
 import com.qijing.core.model.AppEntry
+import com.qijing.feature.scene.InMemorySceneEditorStateStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -37,5 +38,34 @@ class SceneEditorViewModelTest {
         editor.closeEditor()
         assertFalse(editor.editorOpen)
         assertTrue(editor.hasRecoverableDraft)
+    }
+
+    @Test fun `unfinished draft survives a new saved state handle`() {
+        val durableStore = InMemorySceneEditorStateStore()
+        val first = SceneEditorViewModel(SavedStateHandle()).also { it.attachPersistence(durableStore) }
+        first.selectApp(AppEntry("com.example.reader", "阅读器", "2.0", false, true))
+        first.draft = first.draft.copy(name = "阅读草稿", swappiness = "70")
+        first.selectedIntent = "custom"
+        first.closeEditor()
+
+        val restored = SceneEditorViewModel(SavedStateHandle()).also { it.attachPersistence(durableStore) }
+
+        assertTrue(restored.hasRecoverableDraft)
+        assertFalse(restored.editorOpen)
+        assertEquals("com.example.reader", restored.targetApp?.packageName)
+        assertEquals("阅读草稿", restored.draft.name)
+        assertEquals("70", restored.draft.swappiness)
+        assertEquals("custom", restored.selectedIntent)
+    }
+
+    @Test fun `discard clears durable unfinished draft`() {
+        val durableStore = InMemorySceneEditorStateStore()
+        val first = SceneEditorViewModel(SavedStateHandle()).also { it.attachPersistence(durableStore) }
+        first.selectApp(AppEntry("com.example.reader", "阅读器", "2.0", false, true))
+        first.discardDraft()
+
+        val restored = SceneEditorViewModel(SavedStateHandle()).also { it.attachPersistence(durableStore) }
+
+        assertFalse(restored.hasRecoverableDraft)
     }
 }

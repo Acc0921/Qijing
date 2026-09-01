@@ -7,6 +7,8 @@ import com.qijing.core.model.CpuPolicyIntent
 import com.qijing.core.scheduler.SchedulerMode
 import com.qijing.core.scheduler.SchedulerProviderId
 import com.qijing.feature.scene.SceneDraft
+import com.qijing.feature.scene.SceneEditorState
+import com.qijing.feature.scene.SceneEditorStateStore
 
 /**
  * Owns the scene editor independently of a composable destination.
@@ -15,6 +17,8 @@ import com.qijing.feature.scene.SceneDraft
  * process recreation or draft change must run capability discovery and rehearsal again.
  */
 internal class SceneEditorViewModel(private val savedStateHandle: SavedStateHandle) : ViewModel() {
+    private var persistentStore: SceneEditorStateStore? = null
+    private var persistenceAttached = false
     private val restoredApp = restoreApp()
     private val restoredDraft = restoreDraft()
 
@@ -32,6 +36,7 @@ internal class SceneEditorViewModel(private val savedStateHandle: SavedStateHand
         private set(value) {
             targetAppState.value = value
             persistApp(value)
+            persistEditorState()
         }
 
     var draft: SceneDraft
@@ -39,6 +44,7 @@ internal class SceneEditorViewModel(private val savedStateHandle: SavedStateHand
         set(value) {
             draftState.value = value
             persistDraft(value)
+            persistEditorState()
         }
 
     var selectedIntent: String
@@ -46,6 +52,7 @@ internal class SceneEditorViewModel(private val savedStateHandle: SavedStateHand
         set(value) {
             intentState.value = value
             savedStateHandle[KEY_INTENT] = value
+            persistEditorState()
         }
 
     var editorOpen: Boolean
@@ -53,10 +60,30 @@ internal class SceneEditorViewModel(private val savedStateHandle: SavedStateHand
         private set(value) {
             editorOpenState.value = value
             savedStateHandle[KEY_EDITOR_OPEN] = value
+            persistEditorState()
         }
 
     val hasRecoverableDraft: Boolean
         get() = targetApp != null && draft.id.isNotBlank()
+
+    /** Attaches process-durable input after ViewModel creation without persisting any rehearsal. */
+    fun attachPersistence(store: SceneEditorStateStore) {
+        if (persistenceAttached) return
+        persistenceAttached = true
+        persistentStore = store
+        val durable = store.load()
+        if (!hasRecoverableDraft && durable != null) {
+            targetAppState.value = durable.app
+            draftState.value = durable.draft.copy(enabled = false)
+            intentState.value = durable.selectedIntent
+            editorOpenState.value = durable.editorOpen
+            persistApp(durable.app)
+            persistDraft(durable.draft.copy(enabled = false))
+            savedStateHandle[KEY_INTENT] = durable.selectedIntent
+            savedStateHandle[KEY_EDITOR_OPEN] = durable.editorOpen
+        }
+        persistEditorState()
+    }
 
     /** Selecting another app changes the trigger object without discarding the tuning intent. */
     fun selectApp(app: AppEntry) {
@@ -96,6 +123,18 @@ internal class SceneEditorViewModel(private val savedStateHandle: SavedStateHand
         selectedIntent = INTENT_GLOBAL
         editorOpen = false
         ALL_KEYS.forEach { savedStateHandle.remove<Any?>(it) }
+        persistentStore?.clear()
+    }
+
+    private fun persistEditorState() {
+        val app = targetAppState.value
+        val value = draftState.value
+        val store = persistentStore ?: return
+        if (app == null || value.id.isBlank()) {
+            store.clear()
+            return
+        }
+        store.save(SceneEditorState(app, value.copy(enabled = false), intentState.value, editorOpenState.value))
     }
 
     private fun persistApp(app: AppEntry?) {

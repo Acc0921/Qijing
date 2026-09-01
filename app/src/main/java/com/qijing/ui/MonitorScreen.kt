@@ -217,7 +217,7 @@ private fun UnsupportedMonitor(modifier: Modifier = Modifier) {
 private fun WindowBoundaryNotice() {
     ListItem(
         headlineContent = { Text("仅测量栖境自身窗口") },
-        supportingContent = { Text("使用系统 FrameMetrics；不读取、不注入其他应用，也不代表外部游戏 FPS。") },
+        supportingContent = { Text("不读取其他应用，也不代表外部游戏；静止页面只产生少量新帧，低渲染 FPS 不等于卡顿，请结合帧耗时与 P95 判断。") },
         leadingContent = { Icon(Icons.Rounded.Info, null, tint = MaterialTheme.colorScheme.primary) },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent)
     )
@@ -234,9 +234,9 @@ private fun LiveReading(
     val stateLabel = when {
         !running -> "未记录"
         sample == null -> "正在等待帧数据"
-        sample.jankCount == 0 -> "记录中 · 流畅"
-        sample.jankCount <= 2 -> "记录中 · 轻微波动"
-        else -> "记录中 · 卡顿明显"
+        sample.jankCount == 0 -> "记录中 · 无卡顿报告"
+        sample.jankCount <= 2 -> "记录中 · 发现少量卡顿帧"
+        else -> "记录中 · 卡顿帧较多"
     }
     val stateColor = when {
         !running -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -263,7 +263,7 @@ private fun LiveReading(
                 lineHeight = 44.sp,
                 fontWeight = FontWeight.SemiBold
             )
-            Text(" FPS", modifier = Modifier.padding(bottom = 5.dp), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(" 渲染 FPS", modifier = Modifier.padding(bottom = 5.dp), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
         FpsTrend(samples = samples, running = running)
@@ -326,8 +326,8 @@ private fun SessionSummary(summary: FpsSessionSummary) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionLabel("本次会话摘要", "${summary.sampleCount} 个采样窗口", horizontalPadding = 0.dp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            CompactMetric("平均 FPS", summary.averageFps.oneDecimal(), Modifier.weight(1f))
-            CompactMetric("最低 / 最高", "${summary.minFps.oneDecimal()} / ${summary.maxFps.oneDecimal()}", Modifier.weight(1f))
+            CompactMetric("平均渲染 FPS", summary.averageFps.oneDecimal(), Modifier.weight(1f))
+            CompactMetric("渲染最低 / 最高", "${summary.minFps.oneDecimal()} / ${summary.maxFps.oneDecimal()}", Modifier.weight(1f))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             CompactMetric(
@@ -367,7 +367,7 @@ private fun HistorySessionRow(
             Text(
                 summary?.let {
                     val percentile = if (it.hasPerFramePercentile) "帧 P95" else "窗口 P95"
-                    "${it.averageFps.oneDecimal()} FPS · $percentile ${it.p95FrameTimeMs.oneDecimal()} ms · 卡顿 ${it.totalJank}"
+                    "渲染 ${it.averageFps.oneDecimal()} FPS · $percentile ${it.p95FrameTimeMs.oneDecimal()} ms · 卡顿 ${it.totalJank}"
                 }
                     ?: "Session ${sessionId.take(8)}…"
             )

@@ -20,6 +20,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -33,6 +34,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.qijing.core.data.SharedPreferencesNewDataStore
+import com.qijing.feature.scene.SharedPreferencesSceneEditorStateStore
 
 private enum class MainDestination(
     val route: String,
@@ -53,6 +55,8 @@ fun QijingApp() {
     val store = remember(context) { SharedPreferencesNewDataStore(context) }
     val navController = rememberNavController()
     val sceneEditor: SceneEditorViewModel = viewModel()
+    val sceneEditorStore = remember(context) { SharedPreferencesSceneEditorStateStore(context) }
+    LaunchedEffect(sceneEditor, sceneEditorStore) { sceneEditor.attachPersistence(sceneEditorStore) }
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route ?: MainDestination.Overview.route
 

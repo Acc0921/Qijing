@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.AutoAwesomeMotion
@@ -37,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,6 +62,9 @@ import com.qijing.core.execution.BackendPreference
 import com.qijing.core.execution.BackendSelectionResult
 import com.qijing.core.execution.ShizukuRuntime
 import com.qijing.core.logging.SharedPreferencesTaskLogStore
+import com.qijing.core.logging.TaskLog
+import com.qijing.core.logging.TaskLogState
+import com.qijing.core.logging.presentation
 import com.qijing.core.model.ExecutionBackend
 import com.qijing.core.scene.SceneServicePhase
 import com.qijing.core.scene.SceneServiceStateStore
@@ -69,7 +75,10 @@ import com.qijing.feature.overview.OverviewPresenter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun OverviewScreen(store: NewDataStore, onOpenScenes: () -> Unit, onOpenTuning: () -> Unit) {
     val context = LocalContext.current
@@ -77,8 +86,16 @@ internal fun OverviewScreen(store: NewDataStore, onOpenScenes: () -> Unit, onOpe
     val logsStore = remember(context) { SharedPreferencesTaskLogStore(context) }
     val taskEventStore = remember(context) { SharedPreferencesSceneTaskEventStore(context) }
     var logs by remember { mutableStateOf(logsStore.recent(4)) }
+    var taskHistory by remember { mutableStateOf(logsStore.recent(40)) }
+    var showTaskHistory by remember { mutableStateOf(false) }
     var taskEvents by remember { mutableStateOf(taskEventStore.recent(80)) }
     val device = overview.device
+
+    fun openTaskHistory() {
+        logs = logsStore.recent(4)
+        taskHistory = logsStore.recent(40)
+        showTaskHistory = true
+    }
 
     DisposableEffect(taskEventStore) {
         val observation = taskEventStore.observe(80) { taskEvents = it }
@@ -94,8 +111,8 @@ internal fun OverviewScreen(store: NewDataStore, onOpenScenes: () -> Unit, onOpe
             QijingTopAppBar(
                 title = "栖境",
                 actions = {
-                    IconButton(onClick = { logs = logsStore.recent(4) }) {
-                        Icon(Icons.Rounded.History, "刷新任务记录")
+                    IconButton(modifier = Modifier.testTag("task-history-open"), onClick = ::openTaskHistory) {
+                        Icon(Icons.Rounded.History, "查看任务记录")
                     }
                 }
             )
@@ -151,7 +168,7 @@ internal fun OverviewScreen(store: NewDataStore, onOpenScenes: () -> Unit, onOpe
 
         item {
             OverviewPageSection("最近执行") {
-                IconButton(onClick = { logs = logsStore.recent(4) }) { Icon(Icons.Rounded.History, "刷新任务记录") }
+                TextButton(onClick = ::openTaskHistory) { Text("查看全部") }
             }
         }
         item {
@@ -164,15 +181,7 @@ internal fun OverviewScreen(store: NewDataStore, onOpenScenes: () -> Unit, onOpe
                     )
                 } else {
                     logs.asReversed().forEachIndexed { index, log ->
-                        ListItem(
-                            headlineContent = { Text(log.stage, maxLines = 1) },
-                            supportingContent = { Text(log.message, maxLines = 2) },
-                            leadingContent = { StatusBadge(if (log.success) "成功" else "异常", if (log.success) BadgeTone.Good else BadgeTone.Danger) },
-                            trailingContent = {
-                                Text(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(log.timestampMs)), style = MaterialTheme.typography.labelMedium)
-                            },
-                            colors = nativeListColors()
-                        )
+                        TaskLogRow(log)
                         if (index != logs.lastIndex) OverviewDivider()
                     }
                 }
@@ -180,6 +189,53 @@ internal fun OverviewScreen(store: NewDataStore, onOpenScenes: () -> Unit, onOpe
         }
         item { Spacer(Modifier.height(4.dp)) }
     }
+
+    if (showTaskHistory) {
+        ModalBottomSheet(onDismissRequest = { showTaskHistory = false }) {
+            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                Text("任务记录", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+                Text(
+                    "按时间保留预演、验证与恢复证据；技术标识仅保留在内部审计数据中。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)
+                )
+                if (taskHistory.isEmpty()) {
+                    Text("还没有任务记录", modifier = Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 560.dp).testTag("task-history-sheet")) {
+                        items(taskHistory.asReversed(), key = { "${it.taskId}:${it.stage}:${it.timestampMs}" }) { log ->
+                            TaskLogRow(log)
+                            OverviewDivider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TaskLogRow(log: TaskLog) {
+    val item = log.presentation()
+    val tone = when (item.state) {
+        TaskLogState.PREVIEWED -> BadgeTone.Info
+        TaskLogState.COMPLETED, TaskLogState.RESTORED -> BadgeTone.Good
+        TaskLogState.WARNING -> BadgeTone.Warning
+        TaskLogState.FAILED -> BadgeTone.Danger
+    }
+    ListItem(
+        headlineContent = { Text(item.title, maxLines = 1) },
+        supportingContent = { Text(item.detail, maxLines = 2) },
+        leadingContent = { StatusBadge(item.status, tone) },
+        trailingContent = {
+            Text(
+                SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(log.timestampMs)),
+                style = MaterialTheme.typography.labelMedium
+            )
+        },
+        colors = nativeListColors()
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -190,12 +246,16 @@ private fun AutomationControlSection() {
     val preference = remember(context) { BackendPreference(context) }
     val serviceStateStore = remember(context) { SceneServiceStateStore(context) }
     val lifecycleOwner = LocalLifecycleOwner.current
-    var access by remember { mutableStateOf(source.accessState()) }
+    var access by remember { mutableStateOf<com.qijing.core.scene.UsageAccessState?>(null) }
     var selectedBackend by remember { mutableStateOf(preference.selected()) }
     var availability by remember { mutableStateOf(LocalBackendDetector().detect()) }
     var serviceState by remember { mutableStateOf(serviceStateStore.calibratedCurrent()) }
     var backendMessage by remember { mutableStateOf<String?>(null) }
     var showBackendSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(source) {
+        access = withContext(Dispatchers.IO) { source.accessState() }
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -215,6 +275,7 @@ private fun AutomationControlSection() {
     }
 
     val backendReady = selectedBackend == ExecutionBackend.DRY_RUN || availability.firstOrNull { it.backend == selectedBackend }?.available == true
+    val accessGranted = access?.granted == true
     val backendLocked = serviceState.phase != SceneServicePhase.STOPPED
     val summaryTitle: String
     val summaryDetail: String
@@ -227,7 +288,13 @@ private fun AutomationControlSection() {
             summaryValue = "查看任务"
             summaryTone = BadgeTone.Danger
         }
-        !access.granted -> {
+        access == null -> {
+            summaryTitle = "正在确认设备状态"
+            summaryDetail = "正在读取前台应用访问权限"
+            summaryValue = "检查中"
+            summaryTone = BadgeTone.Neutral
+        }
+        !accessGranted -> {
             summaryTitle = "自动化尚未就绪"
             summaryDetail = "还缺少前台应用访问权限"
             summaryValue = "去授权"
@@ -272,12 +339,15 @@ private fun AutomationControlSection() {
         )
         OverviewDivider()
         ListItem(
-            headlineContent = { Text(if (access.granted) "前台应用访问已授权" else "需要前台应用访问权限") },
-            supportingContent = { Text(if (access.granted) "只用于判断当前前台应用，不读取屏幕内容。" else "授权返回后会自动刷新状态。") },
-            leadingContent = { Icon(Icons.Rounded.Security, null, tint = if (access.granted) QijingMint else QijingAmber) },
+            headlineContent = { Text(when { access == null -> "正在确认前台应用访问"; accessGranted -> "前台应用访问已授权"; else -> "需要前台应用访问权限" }) },
+            supportingContent = { Text(if (accessGranted) "只用于判断当前前台应用，不读取屏幕内容。" else if (access == null) "完成检查后会显示可用状态。" else "授权返回后会自动刷新状态。") },
+            leadingContent = { Icon(Icons.Rounded.Security, null, tint = if (accessGranted) QijingMint else QijingAmber) },
             trailingContent = {
-                if (access.granted) StatusBadge("已授权", BadgeTone.Good)
-                else TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) { Text("去授权") }
+                when {
+                    access == null -> StatusBadge("检查中", BadgeTone.Neutral)
+                    accessGranted -> StatusBadge("已授权", BadgeTone.Good)
+                    else -> TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }) { Text("去授权") }
+                }
             },
             colors = nativeListColors()
         )
@@ -299,7 +369,7 @@ private fun AutomationControlSection() {
                 Button(
                     modifier = Modifier.testTag("service-toggle"),
                     enabled = serviceState.phase == SceneServicePhase.RUNNING ||
-                        (serviceState.phase == SceneServicePhase.STOPPED && access.granted && backendReady),
+                        (serviceState.phase == SceneServicePhase.STOPPED && accessGranted && backendReady),
                     onClick = {
                         val intent = Intent(context, SceneTriggerService::class.java)
                         if (serviceState.phase == SceneServicePhase.RUNNING) {
