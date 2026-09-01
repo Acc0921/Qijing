@@ -3,6 +3,8 @@ package com.qijing.feature.telemetry
 import com.qijing.core.data.InMemoryNewDataStore
 import com.qijing.core.model.TelemetrySample
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FpsSessionAnalyzerTest {
@@ -19,6 +21,18 @@ class FpsSessionAnalyzerTest {
         assertEquals(60.0, summary.maxFps, 0.001)
         assertEquals(33.0, summary.p95FrameTimeMs, 0.001)
         assertEquals(3, summary.totalJank)
+        assertFalse(summary.hasPerFramePercentile)
+    }
+
+    @Test fun `summary p95 uses individual frame distribution when present`() {
+        val store = InMemoryNewDataStore()
+        store.appendTelemetry(TelemetrySample("s1", 1, 60.0, 16.0, 0, listOf(10.0, 12.0, 40.0)))
+        store.appendTelemetry(TelemetrySample("s1", 2, 60.0, 16.0, 1, listOf(11.0, 13.0, 50.0)))
+
+        val summary = FpsSessionAnalyzer(store).summarize("s1")!!
+
+        assertEquals(50.0, summary.p95FrameTimeMs, 0.001)
+        assertTrue(summary.hasPerFramePercentile)
     }
 
     @Test fun `session index keeps first seen order without duplicates`() {

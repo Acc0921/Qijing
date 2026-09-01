@@ -1,6 +1,7 @@
 package com.qijing.ui
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -55,6 +56,10 @@ import com.qijing.core.logging.SharedPreferencesTaskLogStore
 import com.qijing.core.model.AppEntry
 import com.qijing.core.model.ExecutionBackend
 import com.qijing.core.model.SceneProfile
+import com.qijing.core.device.observation.CpuObservation
+import com.qijing.core.device.observation.CpuObservationReader
+import com.qijing.core.scheduler.SchedulerMode
+import com.qijing.core.scheduler.SchedulerProviderId
 import com.qijing.core.scene.CapabilityValueReader
 import com.qijing.core.scene.SceneEngine
 import com.qijing.core.scene.ScenePreparation
@@ -63,36 +68,48 @@ import com.qijing.core.scene.SharedPreferencesSceneTaskEventStore
 import com.qijing.feature.scene.SceneDraft
 import com.qijing.feature.scene.SceneDraftStore
 import com.qijing.feature.tuning.CpuStatusReader
+import com.qijing.feature.tuning.profile.GlobalTuningConfiguration
+import com.qijing.feature.tuning.profile.GlobalTuningLoad
+import com.qijing.feature.tuning.profile.GlobalTuningResolution
+import com.qijing.feature.tuning.profile.GlobalTuningResolver
+import com.qijing.feature.tuning.profile.SharedPreferencesGlobalTuningProfileStore
+import com.qijing.feature.tuning.profile.TuningProfileReference
+import com.qijing.feature.tuning.profile.displayName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private const val INTENT_KEEP = "keep"
+private const val INTENT_GLOBAL = "global"
 private const val INTENT_SAVER = "saver"
-private const val INTENT_SYSTEM = "system"
-private const val INTENT_RESPONSIVE = "responsive"
+private const val INTENT_BALANCED = "balanced"
+private const val INTENT_PERFORMANCE = "performance"
+private const val INTENT_EXTREME = "extreme"
 private const val INTENT_CUSTOM = "custom"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ScenesScreen(
     store: NewDataStore,
-    initialApp: AppEntry?,
-    onAppConsumed: () -> Unit,
+    editor: SceneEditorViewModel,
     onChooseApp: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val sceneStore = remember(store) { SceneDraftStore(store) }
     val taskEventStore = remember(context) { SharedPreferencesSceneTaskEventStore(context) }
+    val globalProfileStore = remember(context) { SharedPreferencesGlobalTuningProfileStore(context) }
+    val globalConfiguration = remember(globalProfileStore) {
+        (globalProfileStore.load() as? GlobalTuningLoad.Loaded)?.configuration ?: GlobalTuningConfiguration()
+    }
     val backend = remember(context) { BackendPreference(context).selected() }
     var scenes by remember(store) { mutableStateOf(sceneStore.load()) }
-    var targetApp by remember { mutableStateOf<AppEntry?>(initialApp) }
-    var draft by remember { mutableStateOf(newDraft(initialApp)) }
-    var selectedIntent by remember { mutableStateOf(intentId(draft)) }
-    var editorOpen by remember { mutableStateOf(initialApp != null) }
+    val targetApp = editor.targetApp
+    val draft = editor.draft
+    val selectedIntent = editor.selectedIntent
+    val editorOpen = editor.editorOpen
     var governors by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var cpuObservation by remember { mutableStateOf<CpuObservation?>(null) }
     var preparation by remember { mutableStateOf<ScenePreparation?>(null) }
     var preparationRequestId by remember { mutableStateOf(0L) }
     var preparing by remember { mutableStateOf(false) }
@@ -114,20 +131,22 @@ internal fun ScenesScreen(
     }
 
     LaunchedEffect(Unit) {
-        governors = withContext(Dispatchers.IO) { CpuStatusReader().read().governors }
+        val values = withContext(Dispatchers.IO) { CpuStatusReader().read().governors to CpuObservationReader().read() }
+        governors = values.first
+        cpuObservation = values.second
     }
 
-    LaunchedEffect(initialApp) {
-        if (initialApp != null) {
-            targetApp = initialApp
-            draft = newDraft(initialApp)
-            selectedIntent = INTENT_KEEP
-            editorOpen = true
+    LaunchedEffect(cpuObservation, selectedIntent) {
+        val observed = cpuObservation ?: return@LaunchedEffect
+        if (selectedIntent == INTENT_GLOBAL && targetApp != null) {
+            editor.draft = applyIntent(draft, INTENT_GLOBAL, observed, globalConfiguration)
             invalidatePreparation()
-            message = "已建立应用关系。选择调节意图后运行安全预演。"
-            messageError = false
-            onAppConsumed()
         }
+    }
+
+    BackHandler(enabled = editorOpen) {
+        editor.closeEditor()
+        invalidatePreparation()
     }
 
     val overlapping = scenes.filter { scene ->
@@ -144,14 +163,14 @@ internal fun ScenesScreen(
                 title = if (editorOpen) "编辑场景" else "场景",
                 navigationIcon = {
                     if (editorOpen) {
-                        IconButton(onClick = { editorOpen = false; invalidatePreparation() }) {
+                        IconButton(onClick = { editor.closeEditor(); invalidatePreparation() }) {
                             Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回场景列表")
                         }
                     }
                 },
                 actions = {
                     IconButton(onClick = onChooseApp) {
-                        Icon(Icons.Rounded.Add, if (editorOpen) "更换应用" else "新建场景")
+                        Icon(if (editorOpen) Icons.Rounded.Edit else Icons.Rounded.Add, if (editorOpen) "更换应用" else "新建场景")
                     }
                 }
             )
@@ -176,7 +195,7 @@ internal fun ScenesScreen(
                     } else {
                         OutlinedTextField(
                             value = draft.name,
-                            onValueChange = { draft = draft.copy(name = it, enabled = false); invalidatePreparation() },
+                            onValueChange = { editor.draft = draft.copy(name = it, enabled = false); invalidatePreparation() },
                             modifier = Modifier.fillMaxWidth().testTag("scene-name"),
                             singleLine = true,
                             label = { Text("场景名称") },
@@ -201,17 +220,22 @@ internal fun ScenesScreen(
                         IntentTrack(
                             options = intentOptions(governors),
                             selectedId = selectedIntent,
-                            onSelect = { id -> selectedIntent = id; draft = applyIntent(draft, id); invalidatePreparation() }
+                            onSelect = { id ->
+                                editor.selectedIntent = id
+                                editor.draft = cpuObservation?.let { applyIntent(draft, id, it, globalConfiguration) }
+                                    ?: draft.copy(enabled = false)
+                                invalidatePreparation()
+                            }
                         )
                         AnimatedVisibility(selectedIntent == INTENT_CUSTOM) {
-                            CustomIntentEditor(draft, governors) { changed -> draft = changed.copy(enabled = false); invalidatePreparation() }
+                            CustomIntentEditor(draft, governors) { changed -> editor.draft = changed.copy(enabled = false); invalidatePreparation() }
                         }
                     }
                 }
                 item {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         PriorityTrack(draft.priority, overlapping.size, onValueChange = { value ->
-                            draft = draft.copy(priority = value, enabled = false)
+                            editor.draft = draft.copy(priority = value, enabled = false)
                             invalidatePreparation()
                         })
                         if (samePriority.isNotEmpty()) {
@@ -321,11 +345,22 @@ internal fun ScenesScreen(
                                 Text(if (backend == ExecutionBackend.DRY_RUN) "启用预览场景" else "继续启用真实自动调节")
                             }
                         }
-                        TextButton(modifier = Modifier.fillMaxWidth(), onClick = { editorOpen = false; invalidatePreparation() }) { Text("返回场景列表") }
+                        TextButton(modifier = Modifier.fillMaxWidth(), onClick = { editor.closeEditor(); invalidatePreparation() }) { Text("返回场景列表") }
                     }
                 }
             }
         } else {
+            if (editor.hasRecoverableDraft) {
+                item {
+                    NativeListRow(
+                        title = "继续未完成的场景",
+                        supporting = "${targetApp?.label ?: "已选应用"} · ${draft.name.ifBlank { "未命名场景" }}",
+                        status = "草稿",
+                        onClick = editor::resumeEditor,
+                        leading = { Icon(Icons.Rounded.Edit, null, tint = MaterialTheme.colorScheme.primary) }
+                    )
+                }
+            }
             item {
                 NativeListRow(
                     title = "自动调节安全边界",
@@ -350,21 +385,15 @@ internal fun ScenesScreen(
                                 scenes = sceneStore.load()
                             } else {
                                 openScene(scene, store) { loadedDraft, loadedApp ->
-                                    draft = loadedDraft.copy(enabled = false)
-                                    selectedIntent = intentId(loadedDraft)
-                                    targetApp = loadedApp
+                                    editor.open(loadedDraft, loadedApp, intentId(loadedDraft))
                                     invalidatePreparation()
-                                    editorOpen = true
                                 }
                             }
                         },
                         onEdit = {
                             openScene(scene, store) { loadedDraft, loadedApp ->
-                                draft = loadedDraft.copy(enabled = false)
-                                selectedIntent = intentId(loadedDraft)
-                                targetApp = loadedApp
+                                editor.open(loadedDraft, loadedApp, intentId(loadedDraft))
                                 invalidatePreparation()
-                                editorOpen = true
                             }
                         }
                     )
@@ -525,40 +554,77 @@ private suspend fun prepareScene(context: Context, backend: ExecutionBackend, dr
 }
 
 private fun intentOptions(governors: Set<String>): List<IntentTrackOption> = listOf(
-    IntentTrackOption(INTENT_KEEP, "保持当前", "不设置调节目标"),
-    IntentTrackOption(INTENT_SAVER, "调度节制", "映射 powersave", "powersave" in governors),
-    IntentTrackOption(INTENT_SYSTEM, "系统调度", "映射 schedutil", "schedutil" in governors),
-    IntentTrackOption(INTENT_RESPONSIVE, "响应积极", "映射 performance", "performance" in governors),
-    IntentTrackOption(INTENT_CUSTOM, "自定义", "选择设备候选并设置范围")
+    IntentTrackOption(INTENT_GLOBAL, "跟随全局", "采用调节页保存的默认模式"),
+    IntentTrackOption(INTENT_SAVER, "省电", "优先节制 Governor", governors.any { it in setOf("powersave", "conservative", "schedutil") }),
+    IntentTrackOption(INTENT_BALANCED, "均衡", "优先动态调度", governors.any { it in setOf("schedutil", "interactive", "ondemand") }),
+    IntentTrackOption(INTENT_PERFORMANCE, "性能", "积极响应但不锁频", governors.any { it in setOf("performance", "schedutil", "interactive") }),
+    IntentTrackOption(INTENT_EXTREME, "极速", "积极策略并恢复最高限制", "performance" in governors),
+    IntentTrackOption(INTENT_CUSTOM, "自定义", "按设备策略域设置参数")
 )
 
-private fun applyIntent(draft: SceneDraft, id: String): SceneDraft = when (id) {
-    INTENT_KEEP -> draft.copy(governor = "", minFrequencyKHz = "", maxFrequencyKHz = "", swappiness = "", enabled = false)
-    INTENT_SAVER -> draft.copy(governor = "powersave", minFrequencyKHz = "", maxFrequencyKHz = "", swappiness = "", enabled = false)
-    INTENT_SYSTEM -> draft.copy(governor = "schedutil", minFrequencyKHz = "", maxFrequencyKHz = "", swappiness = "", enabled = false)
-    INTENT_RESPONSIVE -> draft.copy(governor = "performance", minFrequencyKHz = "", maxFrequencyKHz = "", swappiness = "", enabled = false)
-    else -> draft.copy(enabled = false)
+private fun applyIntent(
+    draft: SceneDraft,
+    id: String,
+    cpu: CpuObservation,
+    global: GlobalTuningConfiguration
+): SceneDraft {
+    if (id == INTENT_CUSTOM) return draft.copy(
+        governor = "", minFrequencyKHz = "", maxFrequencyKHz = "", policyIntents = emptyList(), swappiness = "",
+        schedulerProvider = SchedulerProviderId.SYSTEM, schedulerMode = null, followsGlobalProfile = false, enabled = false
+    )
+    val configuration = if (id == INTENT_GLOBAL) global else global.copy(
+        provider = SchedulerProviderId.SYSTEM,
+        selected = TuningProfileReference.BuiltIn(id.schedulerMode() ?: SchedulerMode.BALANCED)
+    )
+    return when (val resolution = GlobalTuningResolver().resolve(configuration, cpu)) {
+        is GlobalTuningResolution.Blocked -> draft.copy(enabled = false)
+        is GlobalTuningResolution.Ready -> resolution.target.let { target ->
+            draft.copy(
+                governor = "",
+                minFrequencyKHz = "",
+                maxFrequencyKHz = "",
+                policyIntents = target.cpu.policies,
+                swappiness = target.memory.swappiness?.toString().orEmpty(),
+                schedulerProvider = target.provider,
+                schedulerMode = target.mode,
+                followsGlobalProfile = id == INTENT_GLOBAL,
+                enabled = false
+            )
+        }
+    }
 }
 
 private fun intentId(draft: SceneDraft): String = when {
-    draft.governor == "powersave" && draft.minFrequencyKHz.isBlank() && draft.maxFrequencyKHz.isBlank() && draft.swappiness.isBlank() -> INTENT_SAVER
-    draft.governor == "schedutil" && draft.minFrequencyKHz.isBlank() && draft.maxFrequencyKHz.isBlank() && draft.swappiness.isBlank() -> INTENT_SYSTEM
-    draft.governor == "performance" && draft.minFrequencyKHz.isBlank() && draft.maxFrequencyKHz.isBlank() && draft.swappiness.isBlank() -> INTENT_RESPONSIVE
+    draft.followsGlobalProfile -> INTENT_GLOBAL
+    draft.schedulerMode == SchedulerMode.POWER_SAVE -> INTENT_SAVER
+    draft.schedulerMode == SchedulerMode.BALANCED -> INTENT_BALANCED
+    draft.schedulerMode == SchedulerMode.PERFORMANCE -> INTENT_PERFORMANCE
+    draft.schedulerMode == SchedulerMode.EXTREME -> INTENT_EXTREME
     draft.hasWritableIntent() -> INTENT_CUSTOM
-    else -> INTENT_KEEP
+    else -> INTENT_CUSTOM
 }
 
 private fun intentLabel(draft: SceneDraft): String = when (intentId(draft)) {
-    INTENT_SAVER -> "调度节制"
-    INTENT_SYSTEM -> "系统调度"
-    INTENT_RESPONSIVE -> "响应积极"
+    INTENT_GLOBAL -> "跟随全局"
+    INTENT_SAVER -> "省电"
+    INTENT_BALANCED -> "均衡"
+    INTENT_PERFORMANCE -> "性能"
+    INTENT_EXTREME -> "极速"
     INTENT_CUSTOM -> "自定义"
-    else -> "保持当前"
+    else -> "自定义"
 }
 
 private fun intentLabel(scene: SceneProfile): String = intentLabel(SceneDraft.fromProfile(scene))
 
-private fun SceneDraft.hasWritableIntent(): Boolean = governor.isNotBlank() || minFrequencyKHz.isNotBlank() || maxFrequencyKHz.isNotBlank() || onlineCores != null || swappiness.isNotBlank() || zramEnabled != null || zramSizeMiB.isNotBlank() || compressionAlgorithm.isNotBlank()
+private fun SceneDraft.hasWritableIntent(): Boolean = schedulerProvider != SchedulerProviderId.SYSTEM || policyIntents.isNotEmpty() || governor.isNotBlank() || minFrequencyKHz.isNotBlank() || maxFrequencyKHz.isNotBlank() || onlineCores != null || swappiness.isNotBlank() || zramEnabled != null || zramSizeMiB.isNotBlank() || compressionAlgorithm.isNotBlank()
+
+private fun String.schedulerMode(): SchedulerMode? = when (this) {
+    INTENT_SAVER -> SchedulerMode.POWER_SAVE
+    INTENT_BALANCED -> SchedulerMode.BALANCED
+    INTENT_PERFORMANCE -> SchedulerMode.PERFORMANCE
+    INTENT_EXTREME -> SchedulerMode.EXTREME
+    else -> null
+}
 
 private fun conflictSummary(draft: SceneDraft, conflicts: List<SceneProfile>): String? {
     if (conflicts.isEmpty()) return null
@@ -570,13 +636,6 @@ private fun conflictSummary(draft: SceneDraft, conflicts: List<SceneProfile>): S
     }
 }
 
-private fun newDraft(app: AppEntry?): SceneDraft = SceneDraft(
-    id = "scene-${System.currentTimeMillis()}",
-    name = app?.label?.let { "$it · 场景" }.orEmpty(),
-    packages = app?.packageName?.let(::setOf) ?: emptySet(),
-    enabled = false
-)
-
 private fun appLabel(store: NewDataStore, scene: SceneProfile): String {
     val apps = store.apps().associateBy { it.packageName }
     return scene.packageNames.joinToString { apps[it]?.label ?: it }
@@ -585,6 +644,6 @@ private fun appLabel(store: NewDataStore, scene: SceneProfile): String {
 private fun openScene(scene: SceneProfile, store: NewDataStore, opened: (SceneDraft, AppEntry) -> Unit) {
     val packageName = scene.packageNames.firstOrNull().orEmpty()
     val app = store.apps().firstOrNull { it.packageName == packageName }
-        ?: AppEntry(packageName, packageName.ifBlank { "未绑定应用" }, "", false)
+        ?: AppEntry(packageName, packageName.ifBlank { "未绑定应用" }, "", false, false)
     opened(SceneDraft.fromProfile(scene), app)
 }

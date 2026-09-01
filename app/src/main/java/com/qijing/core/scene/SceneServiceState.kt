@@ -36,6 +36,14 @@ class SceneServiceStateStore(context: Context) {
         )
     }
 
+    /** Reconciles persisted UI state with the service heartbeat after process death. */
+    fun calibratedCurrent(nowMs: Long = System.currentTimeMillis()): SceneServiceSnapshot {
+        val current = current()
+        val calibrated = SceneServiceStatePolicy.staleState(current, nowMs)
+        if (calibrated != current) write(calibrated.phase, calibrated.backend, calibrated.detail)
+        return calibrated
+    }
+
     fun markRunning(backend: ExecutionBackend, detail: String = "自动化正在观察前台应用") =
         write(SceneServicePhase.RUNNING, backend, detail)
 
@@ -94,6 +102,26 @@ object SceneServiceStatePolicy {
             SceneServicePhase.RECOVERY_REQUIRED,
             backend = previous.backend,
             detail = "服务在恢复完成前中断，无法确认系统是否已恢复；真实执行已锁定"
+        )
+    }
+
+    fun staleState(
+        previous: SceneServiceSnapshot,
+        nowMs: Long,
+        timeoutMs: Long = 90_000L
+    ): SceneServiceSnapshot = when {
+        previous.phase != SceneServicePhase.RUNNING -> previous
+        previous.updatedAtMs <= 0L || nowMs - previous.updatedAtMs <= timeoutMs -> previous
+        previous.backend == ExecutionBackend.DRY_RUN -> SceneServiceSnapshot(
+            phase = SceneServicePhase.STOPPED,
+            detail = "自动化心跳已中断；预览没有修改系统",
+            updatedAtMs = nowMs
+        )
+        else -> SceneServiceSnapshot(
+            phase = SceneServicePhase.RECOVERY_REQUIRED,
+            backend = previous.backend,
+            detail = "自动化心跳已中断，无法确认系统是否已恢复；真实执行已锁定",
+            updatedAtMs = nowMs
         )
     }
 }

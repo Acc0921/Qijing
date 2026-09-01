@@ -17,10 +17,12 @@ import com.qijing.core.model.ExecutionBackend
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
@@ -31,6 +33,7 @@ class SceneTriggerService : Service() {
     private var polling: ScenePollingLoop? = null
     private var coordinator: SceneActivationCoordinator? = null
     private var runtime: BackendRuntime? = null
+    private var heartbeat: Job? = null
     private lateinit var serviceState: SceneServiceStateStore
     private lateinit var taskLogs: SharedPreferencesTaskLogStore
     private lateinit var transactionJournal: SharedPreferencesSceneTransactionJournalStore
@@ -100,6 +103,12 @@ class SceneTriggerService : Service() {
             return
         }
         serviceState.markRunning(selectedBackend)
+        heartbeat = scope.launch {
+            while (isActive) {
+                delay(HEARTBEAT_INTERVAL_MS)
+                serviceState.markRunning(selectedBackend)
+            }
+        }
         val store = SharedPreferencesNewDataStore(this)
         val selectedRuntime = BackendRuntimeFactory.create(this, selectedBackend).also { runtime = it }
         val snapshots = selectedRuntime.readCapability?.let { reader -> SceneSnapshotManager(CapabilityValueReader(reader)) }
@@ -129,35 +138,37 @@ class SceneTriggerService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            if (!initialized) {
-                stopSelf()
-                return START_NOT_STICKY
-            }
-            if (stopRequested) return START_NOT_STICKY
-            stopRequested = true
-            polling?.stop()
-            polling = null
-            serviceState.markStopping(serviceBackend)
-            scope.launch {
-                val outcome = runCatching { coordinator?.restoreActive("user-stop") }.getOrNull()
-                finalizeRecovery(outcome, "用户停止")
-                shutdownFinalized = true
-                stopSelf()
-            }
+            requestOrderlyStop("user-stop", "用户停止")
+            return START_NOT_STICKY
         }
-        return START_NOT_STICKY
+        // A restart never blindly resumes a real write session: onCreate first resolves journal and
+        // persistent RUNNING state, restoring or locking execution before polling can continue.
+        return START_STICKY
     }
 
     override fun onDestroy() {
         polling?.stop(); polling = null
+        heartbeat?.cancel(); heartbeat = null
         if (initialized && !shutdownFinalized && !recoveryRequired) {
-            serviceState.markStopping(serviceBackend, "服务正在退出并尝试恢复已改变的能力")
-            val outcome = runCatching {
-                runBlocking(Dispatchers.IO) {
-                    withTimeoutOrNull(RESTORE_TIMEOUT_MS) { coordinator?.restoreActive("service-destroy") }
-                }
-            }.getOrNull()
-            finalizeRecovery(outcome, "服务退出")
+            if (serviceBackend == ExecutionBackend.DRY_RUN) {
+                serviceState.markStopped("预览服务已退出；预览没有修改系统")
+            } else {
+                val detail = "服务非预期退出，无法在生命周期回调内确认恢复；已锁定真实执行，重新启动后将按事务记录恢复"
+                recoveryRequired = true
+                serviceState.markRecoveryRequired(serviceBackend, detail)
+                taskLogs.append(TaskLog(UUID.randomUUID().toString(), "recovery-required", detail, false, System.currentTimeMillis()))
+                taskEvents.append(
+                    SceneTaskEvent(
+                        taskId = "unexpected-exit-${System.currentTimeMillis()}",
+                        sceneId = "unknown",
+                        sceneName = "中断的自动化任务",
+                        packageName = null,
+                        backend = serviceBackend,
+                        phase = SceneTaskPhase.RECOVERY_REQUIRED,
+                        detail = detail
+                    )
+                )
+            }
         }
         runtime?.close()
         runtime = null
@@ -167,6 +178,34 @@ class SceneTriggerService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        requestOrderlyStop("system-timeout", "系统限制到期")
+    }
+
+    private fun requestOrderlyStop(reason: String, label: String) {
+        if (!initialized) {
+            shutdownFinalized = true
+            serviceState.markStopped("$label：服务尚未进入运行状态")
+            stopSelf()
+            return
+        }
+        if (stopRequested) return
+        stopRequested = true
+        polling?.stop()
+        polling = null
+        heartbeat?.cancel()
+        heartbeat = null
+        serviceState.markStopping(serviceBackend, "$label：正在恢复已改变的能力")
+        scope.launch {
+            val outcome = withTimeoutOrNull(RESTORE_TIMEOUT_MS) {
+                runCatching { coordinator?.restoreActive(reason) }.getOrNull()
+            }
+            finalizeRecovery(outcome, label)
+            shutdownFinalized = true
+            stopSelf()
+        }
+    }
 
     private fun notification(backend: ExecutionBackend): Notification {
         val manager = getSystemService(NotificationManager::class.java)
@@ -324,5 +363,6 @@ class SceneTriggerService : Service() {
         private const val CHANNEL_ID = "scene_trigger"
         private const val NOTIFICATION_ID = 1001
         private const val RESTORE_TIMEOUT_MS = 30_000L
+        private const val HEARTBEAT_INTERVAL_MS = 15_000L
     }
 }

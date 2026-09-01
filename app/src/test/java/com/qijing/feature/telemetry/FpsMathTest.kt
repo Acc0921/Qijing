@@ -18,15 +18,28 @@ class FpsMathTest {
     }
 
     @Test fun `window flush aggregates and resets`() {
-        val accumulator = FpsWindowAccumulator(60f)
+        var now = 1_000_000_000L
+        val accumulator = FpsWindowAccumulator(60f) { now }
         accumulator.add(16_000_000)
         accumulator.add(32_000_000, droppedReportCount = 2)
+        now += 1_000_000_000L
         val sample = accumulator.flush()!!
         assertEquals(2, sample.frameCount)
-        assertEquals(41.666, sample.fps, 0.01)
+        assertEquals(2.0, sample.fps, 0.001)
         assertEquals(24.0, sample.averageFrameTimeMs, 0.001)
         assertEquals(1, sample.jankCount)
         assertEquals(2, sample.droppedReportCount)
+        assertEquals(1_000_000_000L, sample.elapsedNanos)
+        assertEquals(listOf(16.0, 32.0), sample.frameTimesMs)
         assertEquals(null, accumulator.flush())
+    }
+
+    @Test fun `window fps uses elapsed time rather than sum of render durations`() {
+        var now = 0L
+        val accumulator = FpsWindowAccumulator(120f) { now }
+        repeat(60) { accumulator.add(1_000_000L) }
+        now = 1_000_000_000L
+
+        assertEquals(60.0, accumulator.flush()!!.fps, 0.001)
     }
 }

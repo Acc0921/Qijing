@@ -40,7 +40,7 @@ data class SceneTransactionJournal(
         else -> null
     }
 
-    private companion object { const val MAX_RECORDS = 8 }
+    private companion object { const val MAX_RECORDS = 32 }
 }
 
 sealed interface SceneJournalLoad {

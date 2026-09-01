@@ -4,7 +4,7 @@
     <!-- M2 is an on-device app catalog; visibility is required to show package-level scene targets. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
         <application android:theme="@style/Theme.Qijing" android:label="栖境" android:icon="@drawable/ic_qijing">
         <activity android:name=".MainActivity" android:exported="true">
@@ -13,6 +13,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <service android:name=".core.scene.SceneTriggerService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <service
+            android:name=".core.scene.SceneTriggerService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-started on-device foreground-app scene automation with visible stop and recovery controls" />
+        </service>
     </application>
 </manifest>

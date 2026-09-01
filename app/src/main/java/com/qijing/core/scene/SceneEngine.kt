@@ -47,7 +47,10 @@ class SceneEngine(
             return ScenePreparation(scene, backend, rawPlan, snapshot = null, failure)
         }
         val snapshot = snapshots?.capture(rawCommands)
-        val commands = if (snapshot == null) rawCommands else snapshots.attachRestore(rawCommands, snapshot)
+        val commands = if (snapshot == null) rawCommands else orderFrequencyCommands(
+            snapshots.attachRestore(rawCommands, snapshot),
+            snapshot
+        )
         val plan = CommandPlan(taskId, commands)
         if (snapshots != null && broker is CommandValidator) {
             commands.firstOrNull { it.rollback == null }?.let { missing ->
@@ -261,13 +264,65 @@ class SceneEngine(
     }
 
     private fun buildCommands(scene: SceneProfile): List<CapabilityCommand> = buildList {
+        if (scene.schedulerProvider != com.qijing.core.scheduler.SchedulerProviderId.SYSTEM) {
+            val mode = scene.schedulerMode ?: return@buildList
+            val capability = when (scene.schedulerProvider) {
+                com.qijing.core.scheduler.SchedulerProviderId.UPERF -> "scheduler.uperf.mode.set"
+                com.qijing.core.scheduler.SchedulerProviderId.UPERF_GT -> "scheduler.uperf_gt.mode.set"
+                com.qijing.core.scheduler.SchedulerProviderId.FAS_RS -> "scheduler.fas_rs.mode.set"
+                com.qijing.core.scheduler.SchedulerProviderId.SYSTEM -> return@buildList
+            }
+            add(CapabilityCommand(capability, mapOf("value" to mode.stableId)))
+            return@buildList
+        }
         scene.cpu.governor?.let { add(CapabilityCommand("cpu.governor.set", mapOf("value" to it))) }
         scene.cpu.minFrequencyKHz?.let { add(CapabilityCommand("cpu.min_frequency.set", mapOf("khz" to it.toString()))) }
         scene.cpu.maxFrequencyKHz?.let { add(CapabilityCommand("cpu.max_frequency.set", mapOf("khz" to it.toString()))) }
+        scene.cpu.policies.sortedBy { it.policyId }.forEach { policy ->
+            val prefix = "cpu.policy.${policy.policyId}"
+            policy.governor?.let { add(CapabilityCommand("$prefix.governor.set", mapOf("value" to it))) }
+            policy.minFrequencyKHz?.let { add(CapabilityCommand("$prefix.min_frequency.set", mapOf("khz" to it.toString()))) }
+            policy.maxFrequencyKHz?.let { add(CapabilityCommand("$prefix.max_frequency.set", mapOf("khz" to it.toString()))) }
+        }
         scene.cpu.onlineCores?.let { add(CapabilityCommand("cpu.online_cores.set", mapOf("value" to it.sorted().joinToString(",")))) }
         scene.memory.zramEnabled?.let { add(CapabilityCommand("memory.zram.enabled", mapOf("value" to it.toString()))) }
         scene.memory.zramSizeBytes?.let { add(CapabilityCommand("memory.zram.size", mapOf("bytes" to it.toString()))) }
         scene.memory.compressionAlgorithm?.let { add(CapabilityCommand("memory.zram.algorithm.set", mapOf("value" to it))) }
         scene.memory.swappiness?.let { add(CapabilityCommand("memory.swappiness.set", mapOf("value" to it.toString()))) }
+    }
+
+    /** Avoids transient min/max inversions when a policy range moves above or below its old range. */
+    private fun orderFrequencyCommands(
+        commands: List<CapabilityCommand>,
+        snapshot: SceneSnapshot
+    ): List<CapabilityCommand> {
+        val result = commands.toMutableList()
+        val prefixes = commands.mapNotNull { command ->
+            when {
+                command.capability == "cpu.min_frequency.set" || command.capability == "cpu.max_frequency.set" -> "cpu"
+                POLICY_FREQUENCY.matches(command.capability) -> command.capability.substringBeforeLast('.')
+                    .substringBeforeLast('.')
+                else -> null
+            }
+        }.distinct()
+        prefixes.forEach { prefix ->
+            val minCapability = if (prefix == "cpu") "cpu.min_frequency.set" else "$prefix.min_frequency.set"
+            val maxCapability = if (prefix == "cpu") "cpu.max_frequency.set" else "$prefix.max_frequency.set"
+            val minIndex = result.indexOfFirst { it.capability == minCapability }
+            val maxIndex = result.indexOfFirst { it.capability == maxCapability }
+            if (minIndex < 0 || maxIndex < 0) return@forEach
+            val targetMin = result[minIndex].arguments["khz"]?.toLongOrNull() ?: return@forEach
+            val currentMax = snapshot.values[maxCapability]?.toLongOrNull() ?: return@forEach
+            val maxFirst = targetMin > currentMax
+            if (maxFirst && maxIndex > minIndex) {
+                val maxCommand = result.removeAt(maxIndex)
+                result.add(minIndex, maxCommand)
+            }
+        }
+        return result
+    }
+
+    private companion object {
+        val POLICY_FREQUENCY = Regex("cpu\\.policy\\.[0-9]{1,3}\\.(min_frequency|max_frequency)\\.set")
     }
 }

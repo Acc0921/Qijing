@@ -193,7 +193,7 @@ private fun AutomationControlSection() {
     var access by remember { mutableStateOf(source.accessState()) }
     var selectedBackend by remember { mutableStateOf(preference.selected()) }
     var availability by remember { mutableStateOf(LocalBackendDetector().detect()) }
-    var serviceState by remember { mutableStateOf(serviceStateStore.current()) }
+    var serviceState by remember { mutableStateOf(serviceStateStore.calibratedCurrent()) }
     var backendMessage by remember { mutableStateOf<String?>(null) }
     var showBackendSheet by remember { mutableStateOf(false) }
 
@@ -202,7 +202,7 @@ private fun AutomationControlSection() {
             if (event == Lifecycle.Event.ON_RESUME) {
                 access = source.accessState()
                 availability = LocalBackendDetector().detect()
-                serviceState = serviceStateStore.current()
+                serviceState = serviceStateStore.calibratedCurrent()
                 selectedBackend = preference.selected()
             }
         }

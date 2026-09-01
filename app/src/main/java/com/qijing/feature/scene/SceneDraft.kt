@@ -2,10 +2,13 @@ package com.qijing.feature.scene
 
 import com.qijing.core.data.NewDataStore
 import com.qijing.core.model.CpuIntent
+import com.qijing.core.model.CpuPolicyIntent
 import com.qijing.core.model.MemoryIntent
 import com.qijing.core.model.SceneProfile
 import com.qijing.core.scene.ScenePreparation
 import com.qijing.core.model.ExecutionBackend
+import com.qijing.core.scheduler.SchedulerMode
+import com.qijing.core.scheduler.SchedulerProviderId
 
 data class SceneDraft(
     val id: String,
@@ -14,13 +17,17 @@ data class SceneDraft(
     val governor: String = "",
     val minFrequencyKHz: String = "",
     val maxFrequencyKHz: String = "",
+    val policyIntents: List<CpuPolicyIntent> = emptyList(),
     val onlineCores: Set<Int>? = null,
     val zramEnabled: Boolean? = null,
     val zramSizeMiB: String = "",
     val compressionAlgorithm: String = "",
     val swappiness: String = "",
     val priority: Int = 50,
-    val enabled: Boolean = false
+    val enabled: Boolean = false,
+    val schedulerProvider: SchedulerProviderId = SchedulerProviderId.SYSTEM,
+    val schedulerMode: SchedulerMode? = null,
+    val followsGlobalProfile: Boolean = false
 ) {
     companion object {
         fun fromProfile(profile: SceneProfile): SceneDraft = SceneDraft(
@@ -30,13 +37,17 @@ data class SceneDraft(
             governor = profile.cpu.governor.orEmpty(),
             minFrequencyKHz = profile.cpu.minFrequencyKHz?.toString().orEmpty(),
             maxFrequencyKHz = profile.cpu.maxFrequencyKHz?.toString().orEmpty(),
+            policyIntents = profile.cpu.policies,
             onlineCores = profile.cpu.onlineCores,
             zramEnabled = profile.memory.zramEnabled,
             zramSizeMiB = profile.memory.zramSizeBytes?.div(1024 * 1024L)?.toString().orEmpty(),
             compressionAlgorithm = profile.memory.compressionAlgorithm.orEmpty(),
             swappiness = profile.memory.swappiness?.toString().orEmpty(),
             priority = profile.priority.coerceIn(0, 100),
-            enabled = profile.enabled
+            enabled = profile.enabled,
+            schedulerProvider = profile.schedulerProvider,
+            schedulerMode = profile.schedulerMode,
+            followsGlobalProfile = profile.followsGlobalProfile
         )
     }
 
@@ -51,16 +62,26 @@ data class SceneDraft(
         if (swappiness.isNotBlank() && (swappinessValue == null || swappinessValue !in 0..200)) add("swappiness 必须在 0..200")
         if (zramSizeMiB.isNotBlank() && (zramSizeMiB.toLongOrNull() ?: 0) <= 0) add("ZRAM 容量必须大于 0")
         if (priority !in 0..100) add("优先级必须在 0..100")
+        if (schedulerProvider != SchedulerProviderId.SYSTEM && schedulerMode == null) add("第三方调度必须选择模式")
+        if (schedulerProvider != SchedulerProviderId.SYSTEM && hasNativeIntent()) add("第三方调度不能与系统参数同时写入")
     }
 
     fun toProfile(): SceneProfile {
         val errors = validate(); require(errors.isEmpty()) { errors.joinToString("；") }
         return SceneProfile(id = id, name = name, packageNames = packages,
-            cpu = CpuIntent(governor.ifBlank { null }, minFrequencyKHz.toLongOrNull(), maxFrequencyKHz.toLongOrNull(), onlineCores),
+            cpu = CpuIntent(governor.ifBlank { null }, minFrequencyKHz.toLongOrNull(), maxFrequencyKHz.toLongOrNull(), onlineCores, policyIntents),
             memory = MemoryIntent(zramEnabled, zramSizeMiB.toLongOrNull()?.times(1024 * 1024), compressionAlgorithm.ifBlank { null }, swappiness.toIntOrNull()),
             priority = priority,
-            enabled = enabled)
+            enabled = enabled,
+            schedulerProvider = schedulerProvider,
+            schedulerMode = schedulerMode,
+            followsGlobalProfile = followsGlobalProfile)
     }
+
+    private fun hasNativeIntent(): Boolean = governor.isNotBlank() || minFrequencyKHz.isNotBlank() || maxFrequencyKHz.isNotBlank() ||
+        policyIntents.isNotEmpty() ||
+        onlineCores != null || zramEnabled != null ||
+        zramSizeMiB.isNotBlank() || compressionAlgorithm.isNotBlank() || swappiness.isNotBlank()
 }
 
 class SceneDraftStore(private val store: NewDataStore) {

@@ -21,4 +21,13 @@ class SceneServiceStatePolicyTest {
         assertEquals(SceneServicePhase.RECOVERY_REQUIRED, real.phase)
         assertEquals(SceneServicePhase.STOPPED, preview.phase)
     }
+
+    @Test fun `stale heartbeat fails closed for real backend and stops preview`() {
+        val real = SceneServiceSnapshot(SceneServicePhase.RUNNING, ExecutionBackend.ROOT, updatedAtMs = 1_000L)
+        val preview = SceneServiceSnapshot(SceneServicePhase.RUNNING, ExecutionBackend.DRY_RUN, updatedAtMs = 1_000L)
+
+        assertEquals(SceneServicePhase.RECOVERY_REQUIRED, SceneServiceStatePolicy.staleState(real, 100_000L).phase)
+        assertEquals(SceneServicePhase.STOPPED, SceneServiceStatePolicy.staleState(preview, 100_000L).phase)
+        assertEquals(SceneServicePhase.RUNNING, SceneServiceStatePolicy.staleState(real, 50_000L).phase)
+    }
 }

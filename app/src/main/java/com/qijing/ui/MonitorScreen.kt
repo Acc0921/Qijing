@@ -39,6 +39,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -55,12 +56,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.qijing.core.data.NewDataStore
+import com.qijing.core.model.TelemetrySample
 import com.qijing.feature.telemetry.FpsCsvExporter
 import com.qijing.feature.telemetry.FpsMonitor
 import com.qijing.feature.telemetry.FpsSessionAnalyzer
 import com.qijing.feature.telemetry.FpsSessionSummary
 import com.qijing.feature.telemetry.FpsWindowSample
 import com.qijing.feature.telemetry.WindowFpsCollector
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -77,7 +81,26 @@ internal fun MonitorScreen(store: NewDataStore) {
     var latest by remember { mutableStateOf<FpsWindowSample?>(null) }
     val recentSamples = remember { mutableStateListOf<FpsWindowSample>() }
     var selectedSummary by remember { mutableStateOf<FpsSessionSummary?>(null) }
-    var sessionIds by remember(store) { mutableStateOf(store.telemetrySessionIds()) }
+    var sessionIds by remember(store) { mutableStateOf<List<String>>(emptyList()) }
+    var history by remember(store) { mutableStateOf<Map<String, MonitorHistoryEntry>>(emptyMap()) }
+    var pendingSummarySession by remember { mutableStateOf<String?>(null) }
+    var historyRefreshToken by remember { mutableStateOf(0) }
+
+    LaunchedEffect(store, historyRefreshToken) {
+        val loaded = withContext(Dispatchers.IO) {
+            val ids = store.telemetrySessionIds()
+            ids to ids.takeLast(5).associateWith { sessionId ->
+                val samples = store.telemetry(sessionId)
+                MonitorHistoryEntry(samples, analyzer.summarize(sessionId))
+            }
+        }
+        sessionIds = loaded.first
+        history = loaded.second
+        pendingSummarySession?.let { sessionId ->
+            selectedSummary = loaded.second[sessionId]?.summary
+            pendingSummarySession = null
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -125,8 +148,8 @@ internal fun MonitorScreen(store: NewDataStore) {
                             val stoppedSession = activeSessionId
                             collector?.stop()
                             collector = null
-                            stoppedSession?.let { selectedSummary = analyzer.summarize(it) }
-                            sessionIds = store.telemetrySessionIds()
+                            pendingSummarySession = stoppedSession
+                            historyRefreshToken += 1
                         }
                     }
                 )
@@ -155,17 +178,17 @@ internal fun MonitorScreen(store: NewDataStore) {
                 }
             } else {
                 items(sessionIds.takeLast(5).asReversed(), key = { it }) { sessionId ->
-                    val samples = remember(sessionId, sessionIds) { store.telemetry(sessionId) }
-                    val summary = remember(sessionId, sessionIds) { analyzer.summarize(sessionId) }
+                    val entry = history[sessionId]
                     HistorySessionRow(
                         sessionId = sessionId,
-                        timestampMs = samples.firstOrNull()?.timestampMs,
-                        summary = summary,
+                        timestampMs = entry?.samples?.firstOrNull()?.timestampMs,
+                        summary = entry?.summary,
                         onOpen = {
                             activeSessionId = sessionId
-                            selectedSummary = summary
+                            selectedSummary = entry?.summary
                         },
-                        onShare = { context.shareCsv(sessionId, FpsCsvExporter.export(samples)) }
+                        shareEnabled = entry != null,
+                        onShare = { entry?.let { context.shareCsv(sessionId, FpsCsvExporter.export(it.samples)) } }
                     )
                     HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
                 }
@@ -307,7 +330,11 @@ private fun SessionSummary(summary: FpsSessionSummary) {
             CompactMetric("最低 / 最高", "${summary.minFps.oneDecimal()} / ${summary.maxFps.oneDecimal()}", Modifier.weight(1f))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            CompactMetric("P95 帧耗时", "${summary.p95FrameTimeMs.oneDecimal()} ms", Modifier.weight(1f))
+            CompactMetric(
+                if (summary.hasPerFramePercentile) "P95 帧耗时" else "P95 窗口均值",
+                "${summary.p95FrameTimeMs.oneDecimal()} ms",
+                Modifier.weight(1f)
+            )
             CompactMetric("累计卡顿", summary.totalJank.toString(), Modifier.weight(1f))
         }
     }
@@ -331,13 +358,17 @@ private fun HistorySessionRow(
     timestampMs: Long?,
     summary: FpsSessionSummary?,
     onOpen: () -> Unit,
+    shareEnabled: Boolean,
     onShare: () -> Unit
 ) {
     ListItem(
         headlineContent = { Text(timestampMs?.let(::formatSessionTime) ?: "时间未知") },
         supportingContent = {
             Text(
-                summary?.let { "${it.averageFps.oneDecimal()} FPS · P95 ${it.p95FrameTimeMs.oneDecimal()} ms · 卡顿 ${it.totalJank}" }
+                summary?.let {
+                    val percentile = if (it.hasPerFramePercentile) "帧 P95" else "窗口 P95"
+                    "${it.averageFps.oneDecimal()} FPS · $percentile ${it.p95FrameTimeMs.oneDecimal()} ms · 卡顿 ${it.totalJank}"
+                }
                     ?: "Session ${sessionId.take(8)}…"
             )
         },
@@ -347,7 +378,7 @@ private fun HistorySessionRow(
                 IconButton(onClick = onOpen, enabled = summary != null) {
                     Icon(Icons.Rounded.Visibility, "查看摘要")
                 }
-                TextButton(onClick = onShare) {
+                TextButton(onClick = onShare, enabled = shareEnabled) {
                     Icon(Icons.Rounded.IosShare, null)
                     Text("CSV", modifier = Modifier.padding(start = 4.dp))
                 }
@@ -356,6 +387,11 @@ private fun HistorySessionRow(
         colors = ListItemDefaults.colors(containerColor = Color.Transparent)
     )
 }
+
+private data class MonitorHistoryEntry(
+    val samples: List<TelemetrySample>,
+    val summary: FpsSessionSummary?
+)
 
 private fun Double.oneDecimal(): String = String.format(Locale.US, "%.1f", this)
 

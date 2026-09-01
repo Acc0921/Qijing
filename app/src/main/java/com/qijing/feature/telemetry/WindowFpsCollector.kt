@@ -4,6 +4,7 @@ import android.app.Activity
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.SystemClock
 import android.view.FrameMetrics
 import android.view.Window
 import androidx.annotation.RequiresApi
@@ -38,7 +39,7 @@ class WindowFpsCollector(
         thread = worker
         handler = Handler(worker.looper)
         mainHandler = Handler(activity.mainLooper)
-        accumulator = FpsWindowAccumulator(refreshRateHz)
+        accumulator = FpsWindowAccumulator(refreshRateHz, SystemClock::elapsedRealtimeNanos)
         sessionId = monitor.start()
         running = true
         activity.window.addOnFrameMetricsAvailableListener(listener, handler)
@@ -63,9 +64,9 @@ class WindowFpsCollector(
     }
 
     private fun flushWindow() {
-        val sample = accumulator?.flush()
+        val sample = accumulator?.flush(SystemClock.elapsedRealtimeNanos())
         if (sample != null) {
-            monitor.record(sample.fps, sample.averageFrameTimeMs, sample.jankCount)
+            monitor.record(sample.fps, sample.averageFrameTimeMs, sample.jankCount, sample.frameTimesMs)
             mainHandler?.post { onSample(sample) }
         }
         if (running) handler?.postDelayed(::flushWindow, windowDurationMs)

@@ -35,8 +35,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -53,6 +55,8 @@ import com.qijing.core.data.NewDataStore
 import com.qijing.core.model.AppEntry
 import com.qijing.feature.apps.AppListController
 import com.qijing.feature.apps.ApplicationCatalog
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private enum class AppTaskFilter { All, Configured, Unconfigured }
 
@@ -63,8 +67,11 @@ internal fun AppsScreen(store: NewDataStore, onCreateScene: (AppEntry) -> Unit) 
     val controller = remember(context, store) { AppListController(ApplicationCatalog(context), store) }
     var query by remember { mutableStateOf("") }
     var includeSystem by remember { mutableStateOf(false) }
+    var includeNonLaunchable by remember { mutableStateOf(false) }
     var taskFilter by remember { mutableStateOf(AppTaskFilter.All) }
-    var state by remember { mutableStateOf(controller.refresh()) }
+    var state by remember { mutableStateOf(com.qijing.feature.apps.AppListState()) }
+    var loading by remember { mutableStateOf(true) }
+    var refreshToken by remember { mutableStateOf(0) }
     var showFilters by remember { mutableStateOf(false) }
     val scenes = store.scenes()
     val boundPackages = scenes.flatMapTo(mutableSetOf()) { it.packageNames }
@@ -76,6 +83,13 @@ internal fun AppsScreen(store: NewDataStore, onCreateScene: (AppEntry) -> Unit) 
         }
     }
 
+    LaunchedEffect(controller, refreshToken) {
+        loading = true
+        withContext(Dispatchers.IO) { controller.refresh() }
+        state = controller.state(query, includeSystem, includeNonLaunchable)
+        loading = false
+    }
+
     Column(Modifier.fillMaxSize()) {
         TopAppBar(
             title = {
@@ -85,7 +99,7 @@ internal fun AppsScreen(store: NewDataStore, onCreateScene: (AppEntry) -> Unit) 
                 }
             },
             actions = {
-                IconButton(onClick = { state = controller.refresh().let { controller.state(query, includeSystem) } }) {
+                IconButton(onClick = { refreshToken += 1 }, enabled = !loading) {
                     Icon(Icons.Rounded.Refresh, "刷新应用列表")
                 }
                 IconButton(onClick = { showFilters = true }) { Icon(Icons.Rounded.FilterList, "筛选应用") }
@@ -100,7 +114,7 @@ internal fun AppsScreen(store: NewDataStore, onCreateScene: (AppEntry) -> Unit) 
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     OutlinedTextField(
                         value = query,
-                        onValueChange = { query = it; state = controller.state(it, includeSystem) },
+                        onValueChange = { query = it; state = controller.state(it, includeSystem, includeNonLaunchable) },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         leadingIcon = { Icon(Icons.Rounded.Search, null) },
@@ -118,15 +132,18 @@ internal fun AppsScreen(store: NewDataStore, onCreateScene: (AppEntry) -> Unit) 
                             modifier = Modifier.testTag("apps-all-apps"),
                             onClick = {
                                 includeSystem = true
-                                state = controller.state(query, true)
+                                includeNonLaunchable = true
+                                state = controller.state(query, true, true)
                             }
-                        ) { Text(if (includeSystem) "全部应用" else "显示全部") }
+                        ) { Text(if (includeSystem && includeNonLaunchable) "全部软件包" else "显示全部") }
                     }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
 
-            if (visibleItems.isEmpty()) {
+            if (loading) {
+                item { NativeListRow("正在读取应用", "扫描可作为前台触发对象的软件包", "加载中") }
+            } else if (visibleItems.isEmpty()) {
                 item { EmptyState("没有匹配结果", "尝试应用名称、包名，或在筛选中显示系统应用。", Modifier.padding(16.dp)) }
             } else {
                 items(visibleItems, key = { it.packageName }) { app ->
@@ -144,11 +161,22 @@ internal fun AppsScreen(store: NewDataStore, onCreateScene: (AppEntry) -> Unit) 
                 AppsFilterSection("应用范围") {
                     AppsFilterRow("用户应用", !includeSystem) {
                         includeSystem = false
-                        state = controller.state(query, false)
+                        state = controller.state(query, false, includeNonLaunchable)
                     }
                     AppsFilterRow("全部应用（包含系统）", includeSystem) {
                         includeSystem = true
-                        state = controller.state(query, true)
+                        state = controller.state(query, true, includeNonLaunchable)
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                AppsFilterSection("触发资格") {
+                    AppsFilterRow("有桌面入口", !includeNonLaunchable) {
+                        includeNonLaunchable = false
+                        state = controller.state(query, includeSystem, false)
+                    }
+                    AppsFilterRow("全部软件包（专家）", includeNonLaunchable) {
+                        includeNonLaunchable = true
+                        state = controller.state(query, includeSystem, true)
                     }
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
@@ -179,7 +207,15 @@ private fun AppsNativeRow(app: AppEntry, sceneCount: Int, onCreateScene: (AppEnt
         supportingContent = {
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(app.packageName, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("版本 ${app.versionName.ifBlank { "未知" }}${if (app.isSystem) " · 系统应用" else ""}", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    buildString {
+                        append("版本 ${app.versionName.ifBlank { "未知" }}")
+                        if (app.isSystem) append(" · 系统应用")
+                        if (!app.isLaunchable) append(" · 触发资格未知")
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (app.isLaunchable) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.tertiary
+                )
             }
         },
         leadingContent = { AppIcon(app) },
@@ -221,17 +257,20 @@ private fun AppTaskFilter.label(): String = when (this) {
 @Composable
 private fun AppIcon(app: AppEntry) {
     val context = LocalContext.current
-    val bitmap = remember(app.packageName) {
-        runCatching {
-            val drawable = context.packageManager.getApplicationIcon(app.packageName)
-            Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888).also { target ->
-                drawable.setBounds(0, 0, target.width, target.height)
-                drawable.draw(Canvas(target))
-            }.asImageBitmap()
-        }.getOrNull()
+    val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, app.packageName) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val drawable = context.packageManager.getApplicationIcon(app.packageName)
+                Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888).also { target ->
+                    drawable.setBounds(0, 0, target.width, target.height)
+                    drawable.draw(Canvas(target))
+                }.asImageBitmap()
+            }.getOrNull()
+        }
     }
-    if (bitmap != null) {
-        Image(bitmap, contentDescription = "${app.label}图标", modifier = Modifier.size(48.dp).clip(MaterialTheme.shapes.small))
+    val resolvedBitmap = bitmap
+    if (resolvedBitmap != null) {
+        Image(resolvedBitmap, contentDescription = "${app.label}图标", modifier = Modifier.size(48.dp).clip(MaterialTheme.shapes.small))
     } else {
         Surface(
             modifier = Modifier.size(48.dp),

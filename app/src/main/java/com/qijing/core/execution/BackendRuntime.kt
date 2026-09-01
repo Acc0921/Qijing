@@ -97,12 +97,48 @@ object BackendRuntimeFactory {
 
 /** Fixed read-only templates used to capture rollback values before any privileged write. */
 object PrivilegedReadCommandMapper {
-    fun map(capability: String): String? = when (capability) {
-        "cpu.governor.set" -> firstPolicyValue("scaling_governor")
-        "cpu.min_frequency.set" -> firstPolicyValue("scaling_min_freq")
-        "cpu.max_frequency.set" -> firstPolicyValue("scaling_max_freq")
-        "memory.swappiness.set" -> "tr -d '[:space:]' < /proc/sys/vm/swappiness"
-        else -> null
+    fun map(capability: String): String? {
+        POLICY_CAPABILITY.matchEntire(capability)?.let { match ->
+            val policyId = match.groupValues[1].toIntOrNull()?.takeIf { it in 0..255 } ?: return null
+            val node = when (match.groupValues[2]) {
+                "governor" -> "scaling_governor"
+                "min_frequency" -> "scaling_min_freq"
+                "max_frequency" -> "scaling_max_freq"
+                else -> return null
+            }
+            return "tr -d '[:space:]' < /sys/devices/system/cpu/cpufreq/policy$policyId/$node"
+        }
+        return when (capability) {
+            "scheduler.uperf.mode.set" ->
+                "grep -qx 'id=uperf' /data/adb/modules/uperf/module.prop && " +
+                    "tr -d '[:space:]' < /sdcard/Android/yc/uperf/cur_powermode.txt"
+            "scheduler.uperf_gt.mode.set" ->
+                "grep -qx 'id=uperf' /data/adb/modules/uperf/module.prop && " +
+                    "grep -qx 'name=Uperf Game Turbo' /data/adb/modules/uperf/module.prop && " +
+                    "tr -d '[:space:]' < /sdcard/Android/yc/uperf/cur_powermode.txt"
+            "scheduler.fas_rs.mode.set" ->
+                "grep -qx 'id=fas-rs' /data/adb/modules/fas-rs/module.prop && tr -d '[:space:]' < /dev/fas_rs/mode"
+            "scheduler.uperf.probe" -> moduleProbe(
+                "/data/adb/modules/uperf/module.prop",
+                "/sdcard/Android/yc/uperf/cur_powermode.txt",
+                "/data/powercfg.sh"
+            )
+            "scheduler.uperf_gt.probe" -> moduleProbe(
+                "/data/adb/modules/uperf/module.prop",
+                "/sdcard/Android/yc/uperf/cur_powermode.txt",
+                "/data/powercfg.sh"
+            )
+            "scheduler.fas_rs.probe" -> moduleProbe(
+                "/data/adb/modules/fas-rs/module.prop",
+                "/dev/fas_rs/mode",
+                "/dev/fas_rs/mode"
+            )
+            "cpu.governor.set" -> firstPolicyValue("scaling_governor")
+            "cpu.min_frequency.set" -> firstPolicyValue("scaling_min_freq")
+            "cpu.max_frequency.set" -> firstPolicyValue("scaling_max_freq")
+            "memory.swappiness.set" -> "tr -d '[:space:]' < /proc/sys/vm/swappiness"
+            else -> null
+        }
     }
 
     private fun firstPolicyValue(node: String): String =
@@ -110,6 +146,17 @@ object PrivilegedReadCommandMapper {
             "[ -e \"\$file\" ] || continue; tr -d '[:space:]' < \"\$file\" || exit 1; printf '\\n'; done)\" || exit 1; " +
             "[ -n \"\$values\" ] || exit 1; unique=\"\$(printf '%s\\n' \"\$values\" | sort -u)\"; " +
             "[ \"\$(printf '%s\\n' \"\$unique\" | wc -l)\" -eq 1 ] || exit 2; printf '%s' \"\$unique\""
+
+    private fun moduleProbe(moduleProp: String, modePath: String, switchPath: String): String =
+        "[ -f '$moduleProp' ] || exit 1; " +
+            "id=\"\$(sed -n 's/^id=//p' '$moduleProp' | head -n 1)\"; " +
+            "name=\"\$(sed -n 's/^name=//p' '$moduleProp' | head -n 1)\"; " +
+            "version=\"\$(sed -n 's/^version=//p' '$moduleProp' | head -n 1)\"; " +
+            "mode=\"\$([ -r '$modePath' ] && tr -d '[:space:]' < '$modePath')\"; " +
+            "ready=0; [ -e '$switchPath' ] && ready=1; " +
+            "printf '%s\\n%s\\n%s\\n%s\\n%s' \"\$id\" \"\$name\" \"\$version\" \"\$mode\" \"\$ready\""
+
+    private val POLICY_CAPABILITY = Regex("cpu\\.policy\\.([0-9]{1,3})\\.(governor|min_frequency|max_frequency)\\.set")
 }
 
 class UnavailableExecutionBroker(
