@@ -109,7 +109,8 @@ internal fun OverviewScreen(store: NewDataStore, onOpenScenes: () -> Unit, onOpe
     ) {
         item {
             QijingTopAppBar(
-                title = "栖境",
+                title = "设备总览",
+                subtitle = "权限、执行方式与自动化状态",
                 actions = {
                     IconButton(modifier = Modifier.testTag("task-history-open"), onClick = ::openTaskHistory) {
                         Icon(Icons.Rounded.History, "查看任务记录")
@@ -464,7 +465,7 @@ private fun BackendSheetRow(
 
 @Composable
 private fun OverviewNativeGroup(content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth(), content = content)
+    QijingSurfaceGroup(Modifier.padding(horizontal = 16.dp), content = content)
 }
 
 @Composable
@@ -477,11 +478,18 @@ private fun OverviewPageSection(title: String, action: (@Composable () -> Unit)?
 
 @Composable
 private fun OverviewStatusRow(icon: ImageVector, title: String, detail: String, trailing: String, onClick: (() -> Unit)? = null) {
+    val accent = when (icon) {
+        Icons.Rounded.Apps -> QijingViolet
+        Icons.Rounded.AutoAwesomeMotion -> QijingBlue
+        Icons.Rounded.Tune -> QijingAmber
+        Icons.Rounded.Security -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.secondary
+    }
     ListItem(
         modifier = if (onClick == null) Modifier else Modifier.clickable(onClick = onClick),
         headlineContent = { Text(title) },
         supportingContent = { Text(detail, maxLines = 2) },
-        leadingContent = { Icon(icon, null) },
+        leadingContent = { QijingIconTile(accent) { Icon(icon, null) } },
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(trailing, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -161,6 +161,8 @@ internal fun ScenesScreen(
         item {
             QijingTopAppBar(
                 title = if (editorOpen) "编辑场景" else "场景",
+                subtitle = if (editorOpen) "应用 → 意图 → 预演 → 启用" else "按应用匹配，并在离场时恢复",
+                accent = QijingBlue,
                 navigationIcon = {
                     if (editorOpen) {
                         IconButton(onClick = { editor.closeEditor(); invalidatePreparation() }) {
@@ -352,21 +354,25 @@ internal fun ScenesScreen(
         } else {
             if (editor.hasRecoverableDraft) {
                 item {
-                    NativeListRow(
-                        title = "继续未完成的场景",
-                        supporting = "${targetApp?.label ?: "已选应用"} · ${draft.name.ifBlank { "未命名场景" }}",
-                        status = "草稿",
-                        onClick = editor::resumeEditor,
-                        leading = { Icon(Icons.Rounded.Edit, null, tint = MaterialTheme.colorScheme.primary) }
-                    )
+                    QijingSurfaceGroup(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                        NativeListRow(
+                            title = "继续未完成的场景",
+                            supporting = "${targetApp?.label ?: "已选应用"} · ${draft.name.ifBlank { "未命名场景" }}",
+                            status = "草稿",
+                            onClick = editor::resumeEditor,
+                            leading = { QijingIconTile(QijingViolet) { Icon(Icons.Rounded.Edit, null) } }
+                        )
+                    }
                 }
             }
             item {
-                NativeListRow(
-                    title = "自动调节安全边界",
-                    supporting = "命中时重新快照；离场、切换或停止服务时恢复",
-                    status = backend.displayLabel(),
-                    leading = { Icon(Icons.Rounded.Security, null, tint = if (backend == ExecutionBackend.DRY_RUN) QijingBlue else QijingAmber) }
+                QijingStatusSummary(
+                    title = "执行保障",
+                    value = "离场恢复",
+                    detail = "${backend.displayLabel()} · 命中时重新快照，切换或停止服务时恢复原值",
+                    tone = if (backend == ExecutionBackend.DRY_RUN) BadgeTone.Info else BadgeTone.Warning,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                    leading = { Icon(Icons.Rounded.Security, null) }
                 )
             }
             item { PageSectionHeader("已保存场景", if (scenes.isEmpty()) "从一个应用开始建立关系" else "${scenes.size} 个场景", Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) }
@@ -481,12 +487,12 @@ private fun SceneCard(
     onEnabledChange: (Boolean) -> Unit,
     onEdit: () -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().testTag("scene-card-${scene.id}")) {
+    QijingSurfaceGroup(Modifier.padding(horizontal = 16.dp, vertical = 5.dp).testTag("scene-card-${scene.id}")) {
         NativeListRow(
             title = scene.name,
             supporting = "$appLabel · ${intentLabel(scene)} · 优先级 ${scene.priority}\n${if (scene.enabled) "已启用，等待命中；命中不等于已写入" else "已保存，启用前需重新预演"}",
             onClick = onEdit,
-            leading = { Icon(Icons.Rounded.Edit, null, tint = MaterialTheme.colorScheme.primary) },
+            leading = { QijingIconTile(QijingBlue) { Icon(Icons.Rounded.Edit, null) } },
             trailing = {
             Switch(
                 modifier = Modifier.testTag("scene-enabled-${scene.id}").semantics {
@@ -503,7 +509,6 @@ private fun SceneCard(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        HorizontalDivider(Modifier.padding(start = 72.dp), color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 

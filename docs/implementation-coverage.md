@@ -27,7 +27,7 @@
 | 内存、ZRAM 与功耗 | `core.device.observation.MemoryObservationReader` / `BatteryObservationReader` / `ui.TuningScreen` | 展示 RAM、Swap、全部 ZRAM 设备、压缩数据/内存占用/算法，以及电池电流、电压、温度和电池侧瞬时或估算功率；swappiness 具备范围校验、预览、快照、确认、读回和恢复链路。ZRAM 重建继续关闭，功率不冒充 CPU/GPU 分项数据 |
 | FPS 当前窗口采集 | `feature.telemetry.WindowFpsCollector` / `FpsMonitor` / `ui.MonitorScreen` | Android 7+ 使用 FrameMetrics；渲染 FPS 以单调时钟真实经过时间计算，每个窗口批量保存逐帧耗时；界面明确静止窗口低渲染频率不等于卡顿，并引导结合帧耗时/P95 判断；API 23 明确显示不支持，且始终不代表外部应用 FPS |
 | FPS 分析与导出 | `feature.telemetry.FpsSessionAnalyzer` / `FpsCsvExporter` | 新会话使用逐帧分布计算真实 P95；旧窗口级数据明确显示为“P95 窗口均值”；支持平均/极值/jank、历史、摘要和 CSV 系统分享 |
-| 五栏 UI | `MainActivity` / `ui.QijingApp` | 五页使用 Navigation Compose 返回栈、edge-to-edge、紧凑 Top App Bar、原生底部导航、分组列表与 Bottom Sheet；系统返回与对象编辑层级已进入自动化回归 |
+| 五栏 UI | `MainActivity` / `ui.QijingApp` | 五页使用 Navigation Compose 返回栈、edge-to-edge、稳定底部导航、任务型 Top App Bar、低阴影成组表面与 Bottom Sheet；总览状态核心、应用连续列表、场景对象、调节分段数据组和监测会话面板采用同一观感语言，并为系统字体放大提供收敛/重排路径；系统返回与对象编辑层级已进入自动化回归 |
 
 ## 已验证边界
 

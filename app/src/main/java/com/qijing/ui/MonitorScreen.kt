@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -34,9 +35,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -109,7 +112,11 @@ internal fun MonitorScreen(store: NewDataStore) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        QijingTopAppBar(title = "监控")
+        QijingTopAppBar(
+            title = "监控",
+            subtitle = "栖境自身窗口的渲染观察会话",
+            accent = QijingRose
+        )
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N || activity == null) {
             UnsupportedMonitor(Modifier.weight(1f))
@@ -122,7 +129,6 @@ internal fun MonitorScreen(store: NewDataStore) {
         ) {
             item {
                 WindowBoundaryNotice()
-                HorizontalDivider()
             }
             item {
                 LiveReading(
@@ -153,12 +159,10 @@ internal fun MonitorScreen(store: NewDataStore) {
                         }
                     }
                 )
-                HorizontalDivider()
             }
             selectedSummary?.let { summary ->
                 item {
                     SessionSummary(summary)
-                    HorizontalDivider()
                 }
             }
             item {
@@ -190,7 +194,6 @@ internal fun MonitorScreen(store: NewDataStore) {
                         shareEnabled = entry != null,
                         onShare = { entry?.let { context.shareCsv(sessionId, FpsCsvExporter.export(it.samples)) } }
                     )
-                    HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
                 }
             }
         }
@@ -246,7 +249,13 @@ private fun LiveReading(
         else -> MaterialTheme.colorScheme.error
     }
 
-    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp
+    ) {
+    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Rounded.FiberManualRecord, null, tint = stateColor)
             Text(stateLabel, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.labelLarge, color = stateColor)
@@ -268,10 +277,14 @@ private fun LiveReading(
 
         FpsTrend(samples = samples, running = running)
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            CompactMetric("帧耗时", sample?.averageFrameTimeMs?.let { "${it.oneDecimal()} ms" } ?: "--", Modifier.weight(1f))
-            CompactMetric("卡顿帧", sample?.jankCount?.toString() ?: "--", Modifier.weight(1f))
-            CompactMetric("丢失报告", sample?.droppedReportCount?.toString() ?: "--", Modifier.weight(1f))
+        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.background) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+                CompactMetric("帧耗时", sample?.averageFrameTimeMs?.let { "${it.oneDecimal()} ms" } ?: "--", Modifier.weight(1f).padding(horizontal = 10.dp))
+                VerticalDivider(Modifier.height(38.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                CompactMetric("卡顿帧", sample?.jankCount?.toString() ?: "--", Modifier.weight(1f).padding(horizontal = 10.dp))
+                VerticalDivider(Modifier.height(38.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                CompactMetric("丢失报告", sample?.droppedReportCount?.toString() ?: "--", Modifier.weight(1f).padding(horizontal = 10.dp))
+            }
         }
 
         Button(
@@ -281,6 +294,7 @@ private fun LiveReading(
             Icon(if (running) Icons.Rounded.Stop else Icons.Rounded.PlayArrow, null)
             Text(if (running) "停止并生成摘要" else "开始记录", modifier = Modifier.padding(start = 8.dp))
         }
+    }
     }
 }
 
@@ -323,7 +337,8 @@ private fun CompactMetric(label: String, value: String, modifier: Modifier = Mod
 
 @Composable
 private fun SessionSummary(summary: FpsSessionSummary) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    QijingSurfaceGroup(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         SectionLabel("本次会话摘要", "${summary.sampleCount} 个采样窗口", horizontalPadding = 0.dp)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             CompactMetric("平均渲染 FPS", summary.averageFps.oneDecimal(), Modifier.weight(1f))
@@ -337,6 +352,7 @@ private fun SessionSummary(summary: FpsSessionSummary) {
             )
             CompactMetric("累计卡顿", summary.totalJank.toString(), Modifier.weight(1f))
         }
+    }
     }
 }
 
@@ -361,6 +377,11 @@ private fun HistorySessionRow(
     shareEnabled: Boolean,
     onShare: () -> Unit
 ) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surface
+    ) {
     ListItem(
         headlineContent = { Text(timestampMs?.let(::formatSessionTime) ?: "时间未知") },
         supportingContent = {
@@ -386,6 +407,7 @@ private fun HistorySessionRow(
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent)
     )
+    }
 }
 
 private data class MonitorHistoryEntry(

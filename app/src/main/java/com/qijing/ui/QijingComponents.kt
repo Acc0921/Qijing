@@ -3,6 +3,7 @@ package com.qijing.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,8 +11,12 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -33,7 +38,10 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,13 +58,47 @@ fun QijingPanel(
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(
-            containerColor = if (elevated) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface
+            containerColor = MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (elevated) 2.dp else 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (elevated) 1.dp else 0.dp),
         content = { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content) }
     )
+}
+
+/** A rounded native grouping surface. It is reserved for one coherent object or decision. */
+@Composable
+fun QijingSurfaceGroup(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 0.dp,
+        shadowElevation = 1.dp
+    ) {
+        Column(content = content)
+    }
+}
+
+/** Small functional marker used inside rows; unlike a card it never owns layout hierarchy. */
+@Composable
+fun QijingIconTile(
+    color: Color,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    Surface(
+        modifier = modifier.size(40.dp),
+        shape = MaterialTheme.shapes.medium,
+        color = color.copy(alpha = 0.13f),
+        contentColor = color
+    ) {
+        Box(contentAlignment = Alignment.Center) { content() }
+    }
 }
 
 @Composable
@@ -159,16 +201,40 @@ fun EmptyState(title: String, detail: String, modifier: Modifier = Modifier) {
 fun QijingTopAppBar(
     title: String,
     modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    accent: Color = MaterialTheme.colorScheme.primary,
     navigationIcon: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {}
 ) {
+    val largeText = LocalDensity.current.fontScale > 1.3f
     TopAppBar(
-        title = { Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    title,
+                    style = if (largeText) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.width(24.dp).height(3.dp).clip(CircleShape).background(accent))
+                    subtitle?.takeUnless { largeText }?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        },
         modifier = modifier,
         navigationIcon = navigationIcon ?: {},
         actions = actions,
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.background,
+            containerColor = Color.Transparent,
             scrolledContainerColor = MaterialTheme.colorScheme.surface
         )
     )
@@ -181,7 +247,40 @@ fun CompactTopAppBar(
     modifier: Modifier = Modifier,
     navigationIcon: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {}
-) = QijingTopAppBar(title, modifier, navigationIcon, actions)
+) = QijingTopAppBar(title = title, modifier = modifier, navigationIcon = navigationIcon, actions = actions)
+
+data class QijingSegmentOption(val label: String, val testTag: String? = null)
+
+/** Discoverable, touch-safe segmented control for a small set of peer views. */
+@Composable
+fun QijingSegmentedControl(
+    options: List<QijingSegmentOption>,
+    selectedIndex: Int,
+    onSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
+        Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            options.forEachIndexed { index, option ->
+                val selected = selectedIndex == index
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 44.dp)
+                        .then(option.testTag?.let { Modifier.testTag(it) } ?: Modifier)
+                        .selectable(selected = selected, role = Role.Tab, onClick = { onSelected(index) }),
+                    shape = MaterialTheme.shapes.medium,
+                    color = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+                    contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                ) {
+                    Box(Modifier.fillMaxWidth().heightIn(min = 44.dp), contentAlignment = Alignment.Center) {
+                        Text(option.label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                    }
+                }
+            }
+        }
+    }
+}
 
 /** Native section label with optional supporting text and a low-emphasis trailing action. */
 @Composable
@@ -288,22 +387,44 @@ fun QijingStatusSummary(
     leading: (@Composable () -> Unit)? = null
 ) {
     val color = toneColor(tone)
+    val largeText = LocalDensity.current.fontScale > 1.3f
     Surface(
         modifier = modifier.fillMaxWidth().semantics { stateDescription = "$title，$value" },
-        shape = MaterialTheme.shapes.medium,
-        color = color.copy(alpha = 0.10f),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 1.dp,
         contentColor = MaterialTheme.colorScheme.onSurface
     ) {
-        Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            leading?.invoke()
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(value, style = MaterialTheme.typography.titleMedium, color = color)
-                detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (largeText) {
+            Column(
+                Modifier.padding(horizontal = 15.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    QijingIconTile(color) {
+                        if (leading == null) Box(Modifier.size(10.dp).clip(CircleShape).background(color)) else leading.invoke()
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(title, style = MaterialTheme.typography.titleMedium)
+                        detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
+                }
+                StatusBadge(value, tone, Modifier.align(Alignment.End))
+            }
+        } else {
+            Row(
+                Modifier.padding(horizontal = 15.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                QijingIconTile(color) {
+                    if (leading == null) Box(Modifier.size(10.dp).clip(CircleShape).background(color)) else leading.invoke()
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    detail?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+                StatusBadge(value, tone)
             }
         }
     }

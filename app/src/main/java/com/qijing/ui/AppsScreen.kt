@@ -12,8 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
@@ -30,6 +31,7 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -91,13 +93,10 @@ internal fun AppsScreen(store: NewDataStore, onCreateScene: (AppEntry) -> Unit) 
     }
 
     Column(Modifier.fillMaxSize()) {
-        TopAppBar(
-            title = {
-                Column {
-                    Text("应用")
-                    Text("选择应用并建立场景", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            },
+        QijingTopAppBar(
+            title = "应用",
+            subtitle = "选择触发对象并建立调节关系",
+            accent = QijingViolet,
             actions = {
                 IconButton(onClick = { refreshToken += 1 }, enabled = !loading) {
                     Icon(Icons.Rounded.Refresh, "刷新应用列表")
@@ -118,7 +117,14 @@ internal fun AppsScreen(store: NewDataStore, onCreateScene: (AppEntry) -> Unit) 
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         leadingIcon = { Icon(Icons.Rounded.Search, null) },
-                        placeholder = { Text("搜索应用或包名") }
+                        placeholder = { Text("搜索应用或包名") },
+                        shape = MaterialTheme.shapes.large,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surface,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                            focusedBorderColor = QijingViolet,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                        )
                     )
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(
@@ -146,9 +152,14 @@ internal fun AppsScreen(store: NewDataStore, onCreateScene: (AppEntry) -> Unit) 
             } else if (visibleItems.isEmpty()) {
                 item { EmptyState("没有匹配结果", "尝试应用名称、包名，或在筛选中显示系统应用。", Modifier.padding(16.dp)) }
             } else {
-                items(visibleItems, key = { it.packageName }) { app ->
-                    AppsNativeRow(app, scenes.count { app.packageName in it.packageNames }, onCreateScene)
-                    HorizontalDivider(modifier = Modifier.padding(start = 80.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                itemsIndexed(visibleItems, key = { _, app -> app.packageName }) { index, app ->
+                    AppsNativeRow(
+                        app = app,
+                        sceneCount = scenes.count { app.packageName in it.packageNames },
+                        first = index == 0,
+                        last = index == visibleItems.lastIndex,
+                        onCreateScene = onCreateScene
+                    )
                 }
             }
         }
@@ -192,12 +203,26 @@ internal fun AppsScreen(store: NewDataStore, onCreateScene: (AppEntry) -> Unit) 
 }
 
 @Composable
-private fun AppsNativeRow(app: AppEntry, sceneCount: Int, onCreateScene: (AppEntry) -> Unit) {
-    ListItem(
+private fun AppsNativeRow(app: AppEntry, sceneCount: Int, first: Boolean, last: Boolean, onCreateScene: (AppEntry) -> Unit) {
+    val corner = 20.dp
+    val shape = RoundedCornerShape(
+        topStart = if (first) corner else 0.dp,
+        topEnd = if (first) corner else 0.dp,
+        bottomStart = if (last) corner else 0.dp,
+        bottomEnd = if (last) corner else 0.dp
+    )
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(horizontal = 16.dp)
             .testTag("app-row-${app.packageName}")
             .clickable { onCreateScene(app) },
+        shape = shape,
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = if (first) 1.dp else 0.dp
+    ) {
+        Column {
+            ListItem(
         headlineContent = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(app.label, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
@@ -226,8 +251,11 @@ private fun AppsNativeRow(app: AppEntry, sceneCount: Int, onCreateScene: (AppEnt
                 tint = MaterialTheme.colorScheme.primary
             )
         },
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent)
-    )
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent)
+            )
+            if (!last) HorizontalDivider(modifier = Modifier.padding(start = 64.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        }
+    }
 }
 
 @Composable
@@ -274,7 +302,7 @@ private fun AppIcon(app: AppEntry) {
     } else {
         Surface(
             modifier = Modifier.size(48.dp),
-            shape = CircleShape,
+            shape = MaterialTheme.shapes.medium,
             color = if (app.isSystem) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {

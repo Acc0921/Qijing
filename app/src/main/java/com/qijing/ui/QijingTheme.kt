@@ -19,71 +19,73 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
-val QijingMint = Color(0xFF72E1BF)
-val QijingBlue = Color(0xFF8DA9FF)
-val QijingAmber = Color(0xFFFFCA78)
-val QijingDanger = Color(0xFFFF8C82)
-val QijingNight = Color(0xFF080C12)
-val QijingPanel = Color(0xFF111821)
-val QijingPanelRaised = Color(0xFF18222E)
+val QijingMint = Color(0xFF36B895)
+val QijingBlue = Color(0xFF4F82D8)
+val QijingViolet = Color(0xFF7657C7)
+val QijingAmber = Color(0xFFC97825)
+val QijingRose = Color(0xFFC94E69)
+val QijingDanger = Color(0xFFC94E5C)
+val QijingNight = Color(0xFF0E1417)
+val QijingPanel = Color(0xFF172126)
+val QijingPanelRaised = Color(0xFF1D2B30)
 
 private val DarkColors = darkColorScheme(
-    primary = QijingMint,
-    onPrimary = Color(0xFF00382C),
-    primaryContainer = Color(0xFF164F42),
-    onPrimaryContainer = Color(0xFF9DF4D7),
-    secondary = QijingBlue,
+    primary = Color(0xFF6FE0C0),
+    onPrimary = Color(0xFF06231B),
+    primaryContainer = Color(0xFF18352E),
+    onPrimaryContainer = Color(0xFF8AF0D2),
+    secondary = Color(0xFF9ABEFF),
     onSecondary = Color(0xFF10285F),
-    secondaryContainer = Color(0xFF263A70),
-    onSecondaryContainer = Color(0xFFDCE2FF),
-    tertiary = QijingAmber,
+    secondaryContainer = Color(0xFF172B45),
+    onSecondaryContainer = Color(0xFFD9E4FF),
+    tertiary = Color(0xFFFFBD72),
     onTertiary = Color(0xFF432C00),
     background = QijingNight,
-    onBackground = Color(0xFFE7EDF5),
+    onBackground = Color(0xFFEDF7F4),
     surface = QijingPanel,
-    onSurface = Color(0xFFE7EDF5),
+    onSurface = Color(0xFFEDF7F4),
     surfaceVariant = QijingPanelRaised,
-    onSurfaceVariant = Color(0xFFABB8C8),
-    outline = Color(0xFF344354),
-    outlineVariant = Color(0xFF263341),
-    error = QijingDanger,
+    onSurfaceVariant = Color(0xFF9EB1AD),
+    outline = Color(0xFF506267),
+    outlineVariant = Color(0xFF2B3A3E),
+    error = Color(0xFFFF8992),
     onError = Color(0xFF530900),
     errorContainer = Color(0xFF5C211C),
     onErrorContainer = Color(0xFFFFDAD5)
 )
 
 private val LightColors = lightColorScheme(
-    primary = Color(0xFF006B56),
+    primary = Color(0xFF087F68),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFF9DF4D7),
-    onPrimaryContainer = Color(0xFF002018),
-    secondary = Color(0xFF425D9B),
+    primaryContainer = Color(0xFFD6F2E8),
+    onPrimaryContainer = Color(0xFF064F40),
+    secondary = Color(0xFF4F72B8),
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFDCE2FF),
+    secondaryContainer = Color(0xFFEEF5FC),
     onSecondaryContainer = Color(0xFF001A41),
-    tertiary = Color(0xFF775A16),
+    tertiary = Color(0xFFA65B16),
     onTertiary = Color.White,
-    background = Color(0xFFF5F7FA),
-    onBackground = Color(0xFF151B22),
+    background = Color(0xFFEEF1F4),
+    onBackground = Color(0xFF16201F),
     surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF151B22),
-    surfaceVariant = Color(0xFFE8EEF4),
-    onSurfaceVariant = Color(0xFF45515F),
-    outline = Color(0xFF74808E),
-    outlineVariant = Color(0xFFC4CCD6),
-    error = Color(0xFFBA1A1A)
+    onSurface = Color(0xFF16201F),
+    surfaceVariant = Color(0xFFE8F4F0),
+    onSurfaceVariant = Color(0xFF60706F),
+    outline = Color(0xFF7B8A88),
+    outlineVariant = Color(0xFFE0E6E9),
+    error = Color(0xFFB63B47)
 )
 
 private val QijingTypography = Typography(
-    displaySmall = TextStyle(fontSize = 32.sp, lineHeight = 38.sp, fontWeight = FontWeight.SemiBold),
-    headlineLarge = TextStyle(fontSize = 27.sp, lineHeight = 33.sp, fontWeight = FontWeight.SemiBold),
-    headlineMedium = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold),
-    titleLarge = TextStyle(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
-    titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
+    displaySmall = TextStyle(fontSize = 32.sp, lineHeight = 38.sp, fontWeight = FontWeight.Medium),
+    headlineLarge = TextStyle(fontSize = 27.sp, lineHeight = 33.sp, fontWeight = FontWeight.Medium),
+    headlineMedium = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium),
+    titleLarge = TextStyle(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.Medium),
+    titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium),
     bodyLarge = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.Normal),
     bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Normal),
     bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Normal),
-    labelLarge = TextStyle(fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold),
+    labelLarge = TextStyle(fontSize = 14.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
     labelMedium = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium),
     labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium)
 )
@@ -91,9 +93,9 @@ private val QijingTypography = Typography(
 private val QijingShapes = Shapes(
     extraSmall = androidx.compose.foundation.shape.RoundedCornerShape(4.dp),
     small = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-    medium = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-    large = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(20.dp)
+    medium = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+    large = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+    extraLarge = androidx.compose.foundation.shape.RoundedCornerShape(22.dp)
 )
 
 @Composable

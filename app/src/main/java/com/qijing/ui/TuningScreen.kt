@@ -168,13 +168,15 @@ internal fun TuningScreen(dataStore: NewDataStore) {
         item {
             QijingTopAppBar(
                 title = "调节",
+                subtitle = "先观察，再选择目标并安全预演",
+                accent = QijingAmber,
                 actions = {
                     IconButton(onClick = { refreshToken += 1 }) { Icon(Icons.Rounded.Refresh, "刷新设备状态") }
                 }
             )
         }
         item {
-            Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            QijingSurfaceGroup(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 PageSectionHeader("全局调节", "场景可跟随这套默认意图", Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                 NativeListRow(
                     title = "全局模式",
@@ -249,12 +251,17 @@ internal fun TuningScreen(dataStore: NewDataStore) {
             }
         }
         item {
-            TabRow(selectedTabIndex = tab.ordinal) {
-                Tab(modifier = Modifier.testTag("module-M4"), selected = tab == TuningTab.CPU, onClick = { tab = TuningTab.CPU }, text = { Text("CPU") })
-                Tab(modifier = Modifier.testTag("tuning-tab-gpu"), selected = tab == TuningTab.GPU, onClick = { tab = TuningTab.GPU }, text = { Text("GPU") })
-                Tab(modifier = Modifier.testTag("module-M5"), selected = tab == TuningTab.MEMORY, onClick = { tab = TuningTab.MEMORY }, text = { Text("内存") })
-                Tab(modifier = Modifier.testTag("tuning-tab-power"), selected = tab == TuningTab.POWER, onClick = { tab = TuningTab.POWER }, text = { Text("功耗") })
-            }
+            QijingSegmentedControl(
+                options = listOf(
+                    QijingSegmentOption("CPU", "module-M4"),
+                    QijingSegmentOption("GPU", "tuning-tab-gpu"),
+                    QijingSegmentOption("内存", "module-M5"),
+                    QijingSegmentOption("功耗", "tuning-tab-power")
+                ),
+                selectedIndex = tab.ordinal,
+                onSelected = { tab = TuningTab.entries[it] },
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+            )
         }
         item {
             when (tab) {
@@ -436,33 +443,37 @@ private fun CpuObservationPanel(value: CpuObservation?, applying: Boolean, onEdi
     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         PageSectionHeader("CPU 策略域", "频率、Governor 与核心归属来自实时采样", Modifier.padding(16.dp, 8.dp))
         if (value == null) {
-            NativeListRow("CPU", "正在读取设备状态", "采样中")
+            QijingSurfaceGroup(Modifier.padding(horizontal = 16.dp)) { NativeListRow("CPU", "正在读取设备状态", "采样中") }
             return@Column
         }
-        value.policies.forEachIndexed { index, policy ->
-            NativeListRow(
-                title = "${policy.id} · 核心 ${policy.relatedCores.sorted().joinToString()}",
-                supporting = "${policy.governor.display()} · 限制 ${policy.scalingMinFrequencyKHz.displayFrequency()}–${policy.scalingMaxFrequencyKHz.displayFrequency()}",
-                status = policy.currentFrequencyKHz.displayFrequency(),
-                onClick = if (applying) null else ({ onEdit(policy) }),
-                leading = { Icon(Icons.Rounded.Speed, null, tint = QijingMint) }
-            )
-            if (index != value.policies.lastIndex) HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        QijingSurfaceGroup(Modifier.padding(horizontal = 16.dp)) {
+            value.policies.forEachIndexed { index, policy ->
+                NativeListRow(
+                    title = "${policy.id} · 核心 ${policy.relatedCores.sorted().joinToString()}",
+                    supporting = "${policy.governor.display()} · 限制 ${policy.scalingMinFrequencyKHz.displayFrequency()}–${policy.scalingMaxFrequencyKHz.displayFrequency()}",
+                    status = policy.currentFrequencyKHz.displayFrequency(),
+                    onClick = if (applying) null else ({ onEdit(policy) }),
+                    leading = { QijingIconTile(QijingMint) { Icon(Icons.Rounded.Speed, null) } }
+                )
+                if (index != value.policies.lastIndex) HorizontalDivider(Modifier.padding(start = 64.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            }
         }
         PageSectionHeader("每核状态", "负载需要连续两次 /proc/stat 采样", Modifier.padding(16.dp, 12.dp))
-        value.cores.forEachIndexed { index, core ->
-            NativeListRow(
-                title = "CPU ${core.id}",
-                supporting = "${core.policyId ?: "未关联策略域"} · ${core.currentFrequencyKHz.displayFrequency()}",
-                status = when {
-                    core.online.value == false -> "离线"
-                    core.loadPercent.status == MetricStatus.SAMPLING -> "采样中"
-                    core.loadPercent.value != null -> "%.0f%%".format(core.loadPercent.value)
-                    else -> core.loadPercent.status.displayName()
-                },
-                leading = { Icon(Icons.Rounded.DeveloperBoard, null, tint = if (core.online.value == false) MaterialTheme.colorScheme.onSurfaceVariant else QijingBlue) }
-            )
-            if (index != value.cores.lastIndex) HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+        QijingSurfaceGroup(Modifier.padding(horizontal = 16.dp)) {
+            value.cores.forEachIndexed { index, core ->
+                NativeListRow(
+                    title = "CPU ${core.id}",
+                    supporting = "${core.policyId ?: "未关联策略域"} · ${core.currentFrequencyKHz.displayFrequency()}",
+                    status = when {
+                        core.online.value == false -> "离线"
+                        core.loadPercent.status == MetricStatus.SAMPLING -> "采样中"
+                        core.loadPercent.value != null -> "%.0f%%".format(core.loadPercent.value)
+                        else -> core.loadPercent.status.displayName()
+                    },
+                    leading = { QijingIconTile(if (core.online.value == false) MaterialTheme.colorScheme.onSurfaceVariant else QijingBlue) { Icon(Icons.Rounded.DeveloperBoard, null) } }
+                )
+                if (index != value.cores.lastIndex) HorizontalDivider(Modifier.padding(start = 64.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            }
         }
     }
 }
@@ -472,15 +483,17 @@ private fun GpuObservationPanel(value: GpuObservation?) {
     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         PageSectionHeader("GPU 实时状态", "只读观察，不开放 GPU 写入", Modifier.padding(16.dp, 8.dp))
         if (value == null) {
-            NativeListRow("GPU", "正在识别驱动节点", "采样中")
+            QijingSurfaceGroup(Modifier.padding(horizontal = 16.dp)) { NativeListRow("GPU", "正在识别驱动节点", "采样中") }
         } else if (value.devices.isEmpty()) {
             EmptyState("GPU 指标不可用", value.detail ?: value.status.displayName(), Modifier.padding(16.dp))
         } else value.devices.forEach { device ->
-            NativeListRow("${device.adapter} · ${device.id}", "范围 ${device.minFrequencyHz.displayMHzHz()}–${device.maxFrequencyHz.displayMHzHz()}", device.currentFrequencyHz.displayMHzHz())
-            HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-            NativeListRow("GPU 负载", "驱动忙碌时间采样", device.loadPercent.value?.let { "%.0f%%".format(it) } ?: device.loadPercent.status.displayName())
-            HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-            NativeListRow("GPU Governor", "驱动当前策略", device.governor.display())
+            QijingSurfaceGroup(Modifier.padding(horizontal = 16.dp, vertical = 5.dp)) {
+                NativeListRow("${device.adapter} · ${device.id}", "范围 ${device.minFrequencyHz.displayMHzHz()}–${device.maxFrequencyHz.displayMHzHz()}", device.currentFrequencyHz.displayMHzHz())
+                HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                NativeListRow("GPU 负载", "驱动忙碌时间采样", device.loadPercent.value?.let { "%.0f%%".format(it) } ?: device.loadPercent.status.displayName())
+                HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                NativeListRow("GPU Governor", "驱动当前策略", device.governor.display())
+            }
         }
     }
 }
@@ -493,6 +506,7 @@ private fun MemoryObservationPanel(value: MemoryObservation?, applying: Boolean,
     val ratio = if (total != null && available != null && total > 0) ((total - available).toFloat() / total).coerceIn(0f, 1f) else 0f
     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         PageSectionHeader("内存与交换", "RAM、Swap 与全部 ZRAM 设备", Modifier.padding(16.dp, 8.dp))
+        QijingSurfaceGroup(Modifier.padding(horizontal = 16.dp)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("内存使用", style = MaterialTheme.typography.titleMedium)
@@ -510,15 +524,18 @@ private fun MemoryObservationPanel(value: MemoryObservation?, applying: Boolean,
                 if (zram.active.value == false) "未启用" else formatBytes(zram.diskSizeBytes.value)
             )
         }
+        }
         PageSectionHeader("内存回收倾向", "低值更少换出，高值更积极换出", Modifier.padding(16.dp, 12.dp))
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        QijingSurfaceGroup(Modifier.padding(horizontal = 16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("目标 Swappiness")
                 Text(target.toInt().toString(), color = MaterialTheme.colorScheme.primary)
             }
             Slider(target, { target = it }, valueRange = 0f..200f, steps = 19)
         }
-        Button(modifier = Modifier.fillMaxWidth().padding(16.dp), enabled = !applying, onClick = { onPlan(target.toInt()) }) { Text("预览内存调节") }
+        Button(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp), enabled = !applying, onClick = { onPlan(target.toInt()) }) { Text("预览内存调节") }
+        }
     }
 }
 
@@ -526,6 +543,7 @@ private fun MemoryObservationPanel(value: MemoryObservation?, applying: Boolean,
 private fun BatteryObservationPanel(value: BatteryObservation?) {
     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         PageSectionHeader("电池侧功耗", "功率是电池端瞬时值或估算，不代表 CPU/GPU 分项功耗", Modifier.padding(16.dp, 8.dp))
+        QijingSurfaceGroup(Modifier.padding(horizontal = 16.dp)) {
         NativeListRow("当前功率", value?.powerMilliWatts?.detail ?: "电流 × 电压", value?.powerMilliWatts?.value?.let { "%.2f W%s".format(it / 1000.0, if (value.powerMilliWatts.estimated) " · 估算" else "") } ?: value?.powerMilliWatts?.status?.displayName().orEmpty(), leading = { Icon(Icons.Rounded.BatteryChargingFull, null, tint = QijingMint) })
         HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
         NativeListRow("电流", "正负方向依设备上报", value?.currentMicroAmps?.value?.let { "%.0f mA".format(it / 1000.0) } ?: value?.currentMicroAmps?.status?.displayName().orEmpty())
@@ -533,6 +551,7 @@ private fun BatteryObservationPanel(value: BatteryObservation?) {
         NativeListRow("电压", "Android Battery API / sysfs", value?.voltageMilliVolts?.value?.let { "%.3f V".format(it / 1000.0) } ?: value?.voltageMilliVolts?.status?.displayName().orEmpty())
         HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
         NativeListRow("电池温度", "设备电池传感器", value?.temperatureCelsius?.value?.let { "%.1f °C".format(it) } ?: value?.temperatureCelsius?.status?.displayName().orEmpty())
+        }
     }
 }
 
