@@ -134,8 +134,19 @@ class ShizukuUserServiceTransport(
 
 class ShizukuExecutionBroker(private val transport: ShizukuTransport) : ExecutionBroker, CommandValidator, RequiresRollbackSnapshot, ExecutionBackendProvider {
     override val executionBackend: ExecutionBackend = ExecutionBackend.SHIZUKU
-    override fun validate(command: CapabilityCommand): ExecutionResult? =
-        PrivilegedWriteCommandMapper.validationResult(command, "SHIZUKU")
+    override fun validate(command: CapabilityCommand): ExecutionResult? {
+        val base = command.capability.removeSuffix(".restore")
+        if (base == "scheduler.profile.gesture_boost.configure" || base == "scheduler.profile.limiter.clear") {
+            return ExecutionResult.Unsupported(command.capability, "该常驻调度能力仅支持明确选择的 Root 后端")
+        }
+        if (base == "scheduler.profile.limiter.cluster.set") {
+            val cluster = ProfileLimiterCommandPolicy.parse(command)
+            if (cluster != null && ManagedLimiterRuntime.isManaged(cluster)) {
+                return ExecutionResult.Unsupported(command.capability, "动态 limiter worker 仅支持明确选择的 Root 后端")
+            }
+        }
+        return PrivilegedWriteCommandMapper.validationResult(command, "SHIZUKU")
+    }
 
     override suspend fun execute(command: CapabilityCommand): ExecutionResult {
         validate(command)?.let { return it }

@@ -40,6 +40,17 @@ class GlobalTuningResolverTest {
         assertEquals(SchedulerMode.BALANCED, target.mode)
     }
 
+    @Test fun `unknown restored selection cannot drive global or following scenes`() {
+        val config = GlobalTuningConfiguration(selectionKnown = false)
+
+        val result = GlobalTuningResolver().resolve(
+            config,
+            CpuObservation(available(0), emptyList(), emptyList(), 1L)
+        )
+
+        assertTrue(result is GlobalTuningResolution.Blocked)
+    }
+
     private fun policy(id: String, cores: Set<Int>, max: Long) = CpuPolicyObservation(
         id, cores, available(max / 2), available(300_000), available(max), available(300_000), available(max),
         available("schedutil"), available(setOf("powersave", "schedutil", "performance"))

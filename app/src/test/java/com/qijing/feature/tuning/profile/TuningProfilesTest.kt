@@ -7,6 +7,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.json.JSONObject
 
 class TuningProfilesTest {
     @Test fun `four built in modes have stable round trippable references`() {
@@ -55,5 +56,60 @@ class TuningProfilesTest {
 
     @Test fun `global configuration defaults to system provider`() {
         assertEquals(SchedulerProviderId.SYSTEM, GlobalTuningConfiguration().provider)
+    }
+
+    @Test fun `verified recovery atomically switches to previous configuration with a new revision`() {
+        val store = InMemoryGlobalTuningProfileStore()
+        val current = GlobalTuningConfiguration(
+            selected = TuningProfileReference.BuiltIn(SchedulerMode.PERFORMANCE),
+            revision = 3L,
+            updatedAtMs = 30L
+        )
+        assertTrue(store.create(current.copy(revision = 0L)))
+        assertTrue(store.compareAndSet(0L, current.copy(revision = 1L)))
+        val actualCurrent = (store.load() as GlobalTuningLoad.Loaded).configuration
+        val previous = GlobalTuningConfiguration(
+            selected = TuningProfileReference.BuiltIn(SchedulerMode.BALANCED),
+            provider = SchedulerProviderId.SYSTEM,
+            revision = 0L,
+            updatedAtMs = 1L
+        )
+
+        val restored = store.restoreAfterVerifiedRecovery(previous, updatedAtMs = 99L)!!
+
+        assertEquals(TuningProfileReference.BuiltIn(SchedulerMode.BALANCED), restored.selected)
+        assertEquals(actualCurrent.revision + 1L, restored.revision)
+        assertEquals(99L, restored.updatedAtMs)
+        assertTrue(restored.selectionKnown)
+        assertEquals(restored, (store.load() as GlobalTuningLoad.Loaded).configuration)
+    }
+
+    @Test fun `legacy recovery without previous configuration persists unknown selection`() {
+        val store = InMemoryGlobalTuningProfileStore()
+        assertTrue(store.create(GlobalTuningConfiguration()))
+
+        val restored = store.restoreAfterVerifiedRecovery(null, updatedAtMs = 42L)!!
+
+        assertFalse(restored.selectionKnown)
+        assertEquals(1L, restored.revision)
+        assertEquals(42L, restored.updatedAtMs)
+    }
+
+    @Test fun `schema one global configuration migrates as known selection`() {
+        val legacy = JSONObject(
+            """{
+              "schema":1,
+              "selected":"builtin:balance",
+              "provider":"SYSTEM",
+              "revision":2,
+              "updated":3,
+              "custom":[]
+            }""".trimIndent()
+        )
+
+        val decoded = GlobalTuningConfigurationCodec.decode(legacy)
+
+        assertTrue(decoded.selectionKnown)
+        assertEquals(2L, decoded.revision)
     }
 }

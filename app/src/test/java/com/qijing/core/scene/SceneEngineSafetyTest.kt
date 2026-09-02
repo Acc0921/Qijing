@@ -63,6 +63,49 @@ class SceneEngineSafetyTest {
         assertTrue(result.rolledBack)
     }
 
+    @Test fun `unconfirmed process termination never races a late write with rollback`() = runBlocking {
+        val calls = mutableListOf<String>()
+        val journal = InMemorySceneTransactionJournalStore()
+        val events = InMemorySceneTaskEventStore()
+        val broker = object : ExecutionBroker, CommandValidator, ExecutionBackendProvider, RequiresRollbackSnapshot {
+            override val executionBackend = ExecutionBackend.ROOT
+            override fun validate(command: CapabilityCommand): ExecutionResult? = null
+            override suspend fun execute(command: CapabilityCommand): ExecutionResult {
+                calls += command.capability
+                return ExecutionResult.Failed(
+                    "ROOT_TIMEOUT_TERMINATION_UNCONFIRMED",
+                    "Root process tree could not be confirmed stopped"
+                )
+            }
+        }
+        val result = SceneEngine(
+            broker,
+            InMemoryTaskLogStore(),
+            SceneSnapshotManager(CapabilityValueReader { "schedutil" }),
+            journal,
+            events
+        ).apply(scene)
+
+        assertEquals(listOf("cpu.governor.set"), calls)
+        assertFalse(result.rolledBack)
+        assertEquals("ROOT_TIMEOUT_TERMINATION_UNCONFIRMED", (result.failure as ExecutionResult.Failed).code)
+        val persisted = (journal.load() as SceneJournalLoad.Loaded).journal
+        assertEquals(SceneJournalPhase.WRITE_STARTED, persisted.records.single().phase)
+        assertEquals(SceneTaskPhase.RECOVERY_REQUIRED, events.recent().last().phase)
+    }
+
+    @Test fun `runtime exception policy produces bounded single line recovery guidance`() {
+        val detail = SceneRuntimeFailurePolicy.recoveryDetail(
+            "  场景协调  ",
+            IllegalStateException("reader failed\nwith private details" + "x".repeat(400))
+        )
+
+        assertTrue(detail.startsWith("场景协调 异常：reader failed with private details"))
+        assertFalse(detail.contains('\n'))
+        assertTrue(detail.length <= 80 + 240 + 40)
+        assertTrue(detail.contains("锁定真实执行"))
+    }
+
     @Test fun `prepare performs validation and snapshot without executing writes`() = runBlocking {
         val broker = RecordingValidatingBroker(null)
         val snapshots = SceneSnapshotManager(CapabilityValueReader { "schedutil" })
@@ -128,6 +171,53 @@ class SceneEngineSafetyTest {
 
         assertEquals("SCENE_NO_WRITABLE_INTENT", (result.failure as ExecutionResult.Failed).code)
         assertTrue(result.applied.isEmpty())
+    }
+
+    @Test fun `profile expander contributes typed commands to the same preview pipeline`() = runBlocking {
+        val profileScene = SceneProfile(
+            "pack", "Imported", setOf("com.demo"),
+            schedulerProvider = com.qijing.core.scheduler.SchedulerProviderId.QIJING_PROFILE,
+            schedulerMode = com.qijing.core.scheduler.SchedulerMode.PERFORMANCE
+        )
+        val engine = SceneEngine(
+            DryRunExecutionBroker(),
+            InMemoryTaskLogStore(),
+            commandExpander = SceneCommandExpander {
+                SceneCommandExpansion.Commands(
+                    listOf(
+                        CapabilityCommand(
+                            "scheduler.node.write",
+                            mapOf("path" to "/sys/devices/system/cpu/cpufreq/boost", "value" to "1")
+                        )
+                    )
+                )
+            }
+        )
+
+        val result = engine.apply(profileScene)
+
+        assertNull(result.failure)
+        assertEquals("scheduler.node.write", result.plan.commands.single().capability)
+        assertEquals(ExecutionBackend.DRY_RUN, result.applied.single().backend)
+    }
+
+    @Test fun `profile expansion failure blocks before broker execution`() = runBlocking {
+        val broker = RecordingValidatingBroker(null)
+        val profileScene = SceneProfile(
+            "pack", "Imported", setOf("com.demo"),
+            schedulerProvider = com.qijing.core.scheduler.SchedulerProviderId.QIJING_PROFILE,
+            schedulerMode = com.qijing.core.scheduler.SchedulerMode.BALANCED
+        )
+        val engine = SceneEngine(
+            broker,
+            InMemoryTaskLogStore(),
+            commandExpander = SceneCommandExpander { SceneCommandExpansion.Blocked("PACK_MISMATCH", "设备拓扑不匹配") }
+        )
+
+        val result = engine.apply(profileScene)
+
+        assertEquals("PACK_MISMATCH", (result.failure as ExecutionResult.Failed).code)
+        assertEquals(0, broker.calls)
     }
 
     @Test fun `real broker without snapshot reader is rejected before transport`() = runBlocking {

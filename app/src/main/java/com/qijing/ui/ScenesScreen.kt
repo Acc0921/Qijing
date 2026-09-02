@@ -60,7 +60,9 @@ import com.qijing.core.device.observation.CpuObservation
 import com.qijing.core.device.observation.CpuObservationReader
 import com.qijing.core.scheduler.SchedulerMode
 import com.qijing.core.scheduler.SchedulerProviderId
+import com.qijing.core.scheduler.profile.InstalledProfileSceneExpander
 import com.qijing.core.scene.CapabilityValueReader
+import com.qijing.core.scene.CommandValueReader
 import com.qijing.core.scene.SceneEngine
 import com.qijing.core.scene.ScenePreparation
 import com.qijing.core.scene.SceneSnapshotManager
@@ -220,7 +222,7 @@ internal fun ScenesScreen(
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         PageSectionHeader("选择调节意图", "只描述调度倾向，不承诺性能或功耗收益")
                         IntentTrack(
-                            options = intentOptions(governors),
+                            options = intentOptions(governors, globalConfiguration.provider != SchedulerProviderId.SYSTEM),
                             selectedId = selectedIntent,
                             onSelect = { id ->
                                 editor.selectedIntent = id
@@ -536,8 +538,11 @@ private fun RealEnableDialog(
             NativeListRow(title = "作用应用", supporting = draft.packages.joinToString())
             preparation?.plan?.commands?.forEach { command ->
                 val target = command.arguments["value"] ?: command.arguments["khz"] ?: "—"
-                val original = preparation.snapshot?.values?.get(command.capability) ?: "未读取"
-                NativeListRow(title = command.capability, supporting = "参考原值 $original", status = "→ $target")
+                val original = preparation.snapshot?.valueFor(command) ?: "未读取"
+                val objectName = command.arguments["path"]
+                    ?: command.arguments["tid"]?.let { tid -> "线程 $tid · ${command.capability.substringAfterLast('.')}" }
+                    ?: command.capability
+                NativeListRow(title = objectName, supporting = "原值 $original", status = "→ $target")
             }
             NativeListRow(title = "作用时机", supporting = "目标应用进入前台")
             NativeListRow(title = "恢复条件", supporting = "离场、场景切换或停止服务")
@@ -551,19 +556,30 @@ private fun RealEnableDialog(
 private suspend fun prepareScene(context: Context, backend: ExecutionBackend, draft: SceneDraft): ScenePreparation = withContext(Dispatchers.IO) {
     val runtime = BackendRuntimeFactory.create(context, backend)
     try {
-        val snapshots = runtime.readCapability?.let { SceneSnapshotManager(CapabilityValueReader(it)) }
-        SceneEngine(runtime.broker, SharedPreferencesTaskLogStore(context), snapshots).prepare(draft.toProfile(), recordFailureLog = false)
+        val snapshots = runtime.readCommand?.let { SceneSnapshotManager(CommandValueReader(it)) }
+            ?: runtime.readCapability?.let { SceneSnapshotManager(CapabilityValueReader(it)) }
+        SceneEngine(
+            runtime.broker,
+            SharedPreferencesTaskLogStore(context),
+            snapshots,
+            commandExpander = InstalledProfileSceneExpander(
+                context,
+                runtime.readCommand,
+                enableThreadRuntime = backend == ExecutionBackend.ROOT,
+                executionBackend = backend
+            )
+        ).prepare(draft.toProfile(), recordFailureLog = false)
     } finally {
         runtime.close()
     }
 }
 
-private fun intentOptions(governors: Set<String>): List<IntentTrackOption> = listOf(
+private fun intentOptions(governors: Set<String>, structuredProvider: Boolean): List<IntentTrackOption> = listOf(
     IntentTrackOption(INTENT_GLOBAL, "跟随全局", "采用调节页保存的默认模式"),
-    IntentTrackOption(INTENT_SAVER, "省电", "优先节制 Governor", governors.any { it in setOf("powersave", "conservative", "schedutil") }),
-    IntentTrackOption(INTENT_BALANCED, "均衡", "优先动态调度", governors.any { it in setOf("schedutil", "interactive", "ondemand") }),
-    IntentTrackOption(INTENT_PERFORMANCE, "性能", "积极响应但不锁频", governors.any { it in setOf("performance", "schedutil", "interactive") }),
-    IntentTrackOption(INTENT_EXTREME, "极速", "积极策略并恢复最高限制", "performance" in governors),
+    IntentTrackOption(INTENT_SAVER, "省电", "优先节制 Governor", structuredProvider || governors.any { it in setOf("powersave", "conservative", "schedutil") }),
+    IntentTrackOption(INTENT_BALANCED, "均衡", "优先动态调度", structuredProvider || governors.any { it in setOf("schedutil", "interactive", "ondemand") }),
+    IntentTrackOption(INTENT_PERFORMANCE, "性能", "积极响应但不锁频", structuredProvider || governors.any { it in setOf("performance", "schedutil", "interactive") }),
+    IntentTrackOption(INTENT_EXTREME, "极速", "积极策略并恢复最高限制", structuredProvider || "performance" in governors),
     IntentTrackOption(INTENT_CUSTOM, "自定义", "按设备策略域设置参数")
 )
 
@@ -578,7 +594,6 @@ private fun applyIntent(
         schedulerProvider = SchedulerProviderId.SYSTEM, schedulerMode = null, followsGlobalProfile = false, enabled = false
     )
     val configuration = if (id == INTENT_GLOBAL) global else global.copy(
-        provider = SchedulerProviderId.SYSTEM,
         selected = TuningProfileReference.BuiltIn(id.schedulerMode() ?: SchedulerMode.BALANCED)
     )
     return when (val resolution = GlobalTuningResolver().resolve(configuration, cpu)) {

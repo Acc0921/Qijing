@@ -29,6 +29,9 @@ class GlobalTuningResolver {
         cpu: CpuObservation
     ): GlobalTuningResolution {
         configuration.validationError()?.let { return GlobalTuningResolution.Blocked(it) }
+        if (!configuration.selectionKnown) {
+            return GlobalTuningResolution.Blocked("当前全局模式未知，请重新选择模式并完成预演")
+        }
         val selected = configuration.selected
         if (configuration.provider != SchedulerProviderId.SYSTEM) {
             val mode = (selected as? TuningProfileReference.BuiltIn)?.mode

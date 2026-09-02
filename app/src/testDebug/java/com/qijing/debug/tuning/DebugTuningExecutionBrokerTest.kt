@@ -205,7 +205,7 @@ class DebugTuningExecutionBrokerTest {
         val broker = DebugTuningExecutionBroker(store)
 
         val result = broker.execute(
-            CapabilityCommand("memory.swappiness.set.restore", mapOf("value" to "80"))
+            CapabilityCommand("memory.swappiness.set.restore", mapOf("value" to "80", "expected" to "60"))
         ) as ExecutionResult.Failed
 
         assertEquals("SIM_RESTORE_WITHOUT_JOURNAL", result.code)

@@ -4,7 +4,7 @@
 
 | 编号 | 模块 | 第一版职责 |
 | --- | --- | --- |
-| C0 | 特权执行层 | 统一 dry-run、Root、Shizuku 与只读 ADB 契约；结构化返回 supported/applied/failed/rollback。daemon 不进入第一版。 |
+| C0 | 特权执行层 | 统一 dry-run、Root、Shizuku 与只读 ADB 契约；支持配置包节点、Root 线程及托管 limiter/Gesture worker 的类型化执行、写后读回、journal、健康检查和逆序恢复。不会执行导入包脚本。 |
 | C1 | 场景引擎 | 场景定义、触发、优先级、应用与恢复事务。 |
 | C2 | 设备能力与状态探测 | 探测 Android 版本、SoC、厂商、可写路径、可用后端，以及 CPU/GPU/内存/ZRAM/电池侧功耗的只读状态。 |
 | C3 | 全新数据层 | 仅保存新版本设备、应用、场景、调节配置和遥测数据；不迁移旧表。 |
@@ -18,13 +18,13 @@
 | M1 | 设备总览 | 展示设备就绪状态、权限、当前后端、自动化、CPU/内存/ZRAM 只读摘要与场景任务轨迹。详细 CPU/GPU/内存/功耗观察留在调节页，FPS 会话留在监控页。 |
 | M2 | 应用列表 | 查询、筛选应用，进入应用场景配置。 |
 | M3 | 应用场景 | 用户配置和编排入口；负责选择“何时应用哪套配置”，可跟随全局模式或覆盖为指定意图。 |
-| M4 | CPU 与调度 | 提供省电/均衡/性能/极速四档全局模式、设备实际支持的逐策略域 Governor/频率自定义，以及 Uperf/UperfGT/fas-rs 固定契约；观察每核频率、在线状态、负载、策略域和 GPU 状态。第一版真实写入只开放白名单 Governor、频率与固定第三方模式，GPU 和核心上下线只读。 |
+| M4 | CPU 与调度 | 提供省电/均衡/性能/极速四档全局模式、逐策略域自定义、Uperf/UperfGT/fas-rs 固定契约，以及本地配置包引擎。匹配设备的配置可控制声明的 CPU/GPU、核心在线、WALT、cpuset、刷新率与厂商节点，并以 Root 常驻协调线程 affinity/cpuset/RR/nice、动态 limiter 和受限 Gesture Boost。 |
 | M5 | 内存与 ZRAM | 展示 RAM、Swap、全部 ZRAM 设备、压缩数据、算法与电池侧功耗；仅 swappiness 开放预演、验证和安全回滚，ZRAM 重建关闭。 |
 | M8 | FPS 监控 | session 采集 FPS、frame time、jank，并提供摘要。 |
 
 ## 明确移除
 
-第一版不包含历史数据迁移、电池/充电写入调节、显示调节、OTA、温控移除、在线脚本商店、云端账户、Magisk/Xposed 商店、daemon、CPU 核心上下线写入、GPU 写入、ZRAM 重建和外部应用 FPS。电池侧功率只作观察，不宣称 CPU/GPU 分项功耗。
+第一版不包含历史数据迁移、电池/充电写入、OTA、温控移除、在线脚本商店、云端账户、Magisk/Xposed 商店、ZRAM 重建和外部应用 FPS。配置包之外的任意 Shell、分区修改和应用数据清理不进入执行链；limiter 的 `ddr_boost` 与 Gesture 非空 exit 在缺少可验证语义前阻断；电池侧功率只作观察，不宣称 CPU/GPU 分项功耗。
 
 ## 调节归属
 

@@ -18,7 +18,8 @@ class SceneEngine(
     private val logs: TaskLogStore,
     private val snapshots: SceneSnapshotManager? = null,
     private val journalStore: SceneTransactionJournalStore? = null,
-    private val events: SceneTaskEventStore? = null
+    private val events: SceneTaskEventStore? = null,
+    private val commandExpander: SceneCommandExpander? = null
 ) {
     /** Builds and validates a plan without performing any writes. */
     suspend fun prepare(
@@ -26,7 +27,16 @@ class SceneEngine(
         recordFailureLog: Boolean = true,
         taskId: String = UUID.randomUUID().toString()
     ): ScenePreparation {
-        val rawCommands = buildCommands(scene)
+        val expanded = commandExpander?.expand(scene)
+        if (expanded is SceneCommandExpansion.Blocked) {
+            val failure = ExecutionResult.Failed(expanded.code, expanded.reason)
+            val emptyPlan = CommandPlan(taskId, emptyList())
+            recordPreparationFailure(taskId, "profile-expansion", failure, recordFailureLog)
+            return ScenePreparation(scene, (broker as? ExecutionBackendProvider)?.executionBackend, emptyPlan, null, failure)
+        }
+        val rawCommands = coalesceCommands(
+            buildCommands(scene) + (expanded as? SceneCommandExpansion.Commands)?.commands.orEmpty()
+        )
         val backend = (broker as? ExecutionBackendProvider)?.executionBackend
         val rawPlan = CommandPlan(taskId, rawCommands)
         if (recordFailureLog) recordEvent(scene, taskId, backend, SceneTaskPhase.PREFLIGHT, "检查能力白名单、参数和恢复条件")
@@ -171,6 +181,19 @@ class SceneEngine(
                 continue
             }
             recordEvent(scene, plan.id, backend, SceneTaskPhase.FAILED, result.toString())
+            if (result is ExecutionResult.Failed && result.code.endsWith("_TERMINATION_UNCONFIRMED")) {
+                // A late descendant could still complete the write after an immediate rollback.
+                // Keep this command at WRITE_STARTED and leave the durable journal for explicit
+                // recovery once process termination can be established.
+                recordEvent(
+                    scene,
+                    plan.id,
+                    backend,
+                    SceneTaskPhase.RECOVERY_REQUIRED,
+                    "执行进程可能仍在运行，已禁止竞争性恢复并保留 journal"
+                )
+                return TransactionResult(plan, appliedCommands.map { it.third }, result, rolledBack = false)
+            }
             var rolledBack = true
             var rollbackAttempted = false
             val rollbackCommands = buildList<Pair<Int, CapabilityCommand>> {
@@ -271,6 +294,7 @@ class SceneEngine(
                 com.qijing.core.scheduler.SchedulerProviderId.UPERF_GT -> "scheduler.uperf_gt.mode.set"
                 com.qijing.core.scheduler.SchedulerProviderId.FAS_RS -> "scheduler.fas_rs.mode.set"
                 com.qijing.core.scheduler.SchedulerProviderId.CONFIG_BRIDGE -> "scheduler.config_bridge.mode.set"
+                com.qijing.core.scheduler.SchedulerProviderId.QIJING_PROFILE -> return@buildList
                 com.qijing.core.scheduler.SchedulerProviderId.SYSTEM -> return@buildList
             }
             add(CapabilityCommand(capability, mapOf("value" to mode.stableId)))
@@ -290,6 +314,17 @@ class SceneEngine(
         scene.memory.zramSizeBytes?.let { add(CapabilityCommand("memory.zram.size", mapOf("bytes" to it.toString()))) }
         scene.memory.compressionAlgorithm?.let { add(CapabilityCommand("memory.zram.algorithm.set", mapOf("value" to it))) }
         scene.memory.swappiness?.let { add(CapabilityCommand("memory.swappiness.set", mapOf("value" to it.toString()))) }
+    }
+
+    /** Keeps only the final intent for one concrete resource so every journal record has one stable before-state. */
+    private fun coalesceCommands(commands: List<CapabilityCommand>): List<CapabilityCommand> {
+        val byIdentity = linkedMapOf<String, CapabilityCommand>()
+        commands.forEach { command ->
+            val identity = command.snapshotIdentity()
+            byIdentity.remove(identity)
+            byIdentity[identity] = command
+        }
+        return byIdentity.values.toList()
     }
 
     /** Avoids transient min/max inversions when a policy range moves above or below its old range. */

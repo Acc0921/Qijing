@@ -20,15 +20,20 @@ data class GlobalTuningRecoveryPlan(
     val backend: ExecutionBackend,
     val commands: List<CapabilityCommand>,
     val createdAtMs: Long,
-    val label: String
+    val label: String,
+    /** UI intent that corresponded to the captured system values; absent on legacy schema 1 plans. */
+    val previousConfiguration: GlobalTuningConfiguration? = null
 ) {
     fun validationError(): String? = when {
         backend !in setOf(ExecutionBackend.ROOT, ExecutionBackend.SHIZUKU) -> "恢复计划后端无效"
-        commands.isEmpty() || commands.size > 32 -> "恢复命令数量无效"
+        commands.isEmpty() || commands.size > MAX_RECOVERY_COMMANDS -> "恢复命令数量无效"
         commands.any { !it.capability.endsWith(".restore") } -> "恢复命令类型无效"
-        commands.any { PrivilegedWriteCommandMapper.map(it) !is PrivilegedWriteCommandMapper.Result.Command } -> "恢复命令不在白名单"
+        commands.any { command ->
+            command.toForwardCommandOrNull()?.let(PrivilegedWriteCommandMapper::map) !is PrivilegedWriteCommandMapper.Result.Command
+        } -> "恢复目标不在白名单"
         commands.any { it.capability in setOf("scheduler.uperf.mode.set.restore", "scheduler.uperf_gt.mode.set.restore") && SchedulerMode.fromStableId(it.arguments["value"].orEmpty()) == null } -> "Uperf 当前模式不能安全转换为可撤销计划"
         commands.any { it.capability == "scheduler.config_bridge.mode.set.restore" && SchedulerMode.fromStableId(it.arguments["value"].orEmpty()) == null } -> "配置调度桥接当前模式不能安全转换为可撤销计划"
+        previousConfiguration?.validationError() != null -> "恢复计划中的原全局配置无效"
         else -> null
     }
 
@@ -88,8 +93,37 @@ data class GlobalTuningRecoveryPlan(
         )
     }
 
+    /** Replays stored target values through the normal forward-command validation and snapshot path. */
+    fun toForwardCommands(): List<CapabilityCommand> {
+        validationError()?.let { error(it) }
+        return commands.map { it.toForwardCommandOrNull() ?: error("恢复命令无法转换") }
+    }
+
+    private fun CapabilityCommand.toForwardCommandOrNull(): CapabilityCommand? {
+        if (!capability.endsWith(".restore")) return null
+        val forwardCapability = capability.removeSuffix(".restore")
+        val forwardArguments = when {
+            forwardCapability.endsWith(".min_frequency.set") || forwardCapability.endsWith(".max_frequency.set") ->
+                mapOf("khz" to (arguments["value"] ?: return null))
+            forwardCapability == "scheduler.node.write" -> mapOf(
+                "path" to (arguments["path"] ?: return null),
+                "value" to (arguments["value"] ?: return null)
+            )
+            forwardCapability == "scheduler.profile.limiter.cluster.set" ->
+                arguments - setOf("expected_min_khz", "expected_max_khz", "expected_core_ctl")
+            forwardCapability == "scheduler.profile.app_frequencies.set" -> mapOf(
+                "package" to (arguments["package"] ?: return null),
+                "performance_khz" to (arguments["performance_khz"] ?: return null),
+                "efficiency_khz" to (arguments["efficiency_khz"] ?: return null)
+            )
+            else -> mapOf("value" to (arguments["value"] ?: return null))
+        }
+        return CapabilityCommand(forwardCapability, forwardArguments)
+    }
+
     private companion object {
         val POLICY = Regex("cpu\\.policy\\.([0-9]{1,3})\\.(governor|min_frequency|max_frequency)\\.set")
+        const val MAX_RECOVERY_COMMANDS = 2_048
     }
 }
 
@@ -109,40 +143,53 @@ class SharedPreferencesGlobalTuningRecoveryStore(context: Context) : GlobalTunin
 
     override fun load(): GlobalTuningRecoveryLoad {
         val raw = prefs.getString("plan", null) ?: return GlobalTuningRecoveryLoad.None
-        return runCatching {
-            val root = JSONObject(raw)
-            require(root.getInt("schema") == 1)
-            GlobalTuningRecoveryPlan(
-                ExecutionBackend.valueOf(root.getString("backend")),
-                root.getJSONArray("commands").let { array ->
-                    (0 until array.length()).map { index ->
-                        val item = array.getJSONObject(index)
-                        val arguments = item.getJSONObject("arguments")
-                        CapabilityCommand(
-                            item.getString("capability"),
-                            arguments.keys().asSequence().associateWith { arguments.getString(it) }
-                        )
-                    }
-                },
-                root.getLong("created"),
-                root.getString("label")
-            ).also { require(it.validationError() == null) { it.validationError().orEmpty() } }
-        }.fold({ GlobalTuningRecoveryLoad.Loaded(it) }, { GlobalTuningRecoveryLoad.Corrupt(it.message ?: "恢复计划损坏") })
+        return runCatching { GlobalTuningRecoveryCodec.decode(JSONObject(raw)) }
+            .fold({ GlobalTuningRecoveryLoad.Loaded(it) }, { GlobalTuningRecoveryLoad.Corrupt(it.message ?: "恢复计划损坏") })
     }
 
     override fun save(plan: GlobalTuningRecoveryPlan): Boolean {
         if (plan.validationError() != null) return false
-        val json = JSONObject().apply {
-            put("schema", 1)
-            put("backend", plan.backend.name)
-            put("created", plan.createdAtMs)
-            put("label", plan.label)
-            put("commands", JSONArray(plan.commands.map { command -> JSONObject().apply {
-                put("capability", command.capability)
-                put("arguments", JSONObject(command.arguments))
-            } }))
-        }
+        val json = GlobalTuningRecoveryCodec.encode(plan)
         return prefs.edit().putString("plan", json.toString()).commit()
+    }
+}
+
+internal object GlobalTuningRecoveryCodec {
+    private const val SCHEMA = 2
+
+    fun encode(plan: GlobalTuningRecoveryPlan): JSONObject = JSONObject().apply {
+        put("schema", SCHEMA)
+        put("backend", plan.backend.name)
+        put("created", plan.createdAtMs)
+        put("label", plan.label)
+        put("previousConfiguration", plan.previousConfiguration?.let(GlobalTuningConfigurationCodec::encode))
+        put("commands", JSONArray(plan.commands.map { command -> JSONObject().apply {
+            put("capability", command.capability)
+            put("arguments", JSONObject(command.arguments))
+        } }))
+    }
+
+    fun decode(root: JSONObject): GlobalTuningRecoveryPlan {
+        val schema = root.getInt("schema")
+        require(schema in 1..SCHEMA)
+        return GlobalTuningRecoveryPlan(
+            ExecutionBackend.valueOf(root.getString("backend")),
+            root.getJSONArray("commands").let { array ->
+                (0 until array.length()).map { index ->
+                    val item = array.getJSONObject(index)
+                    val arguments = item.getJSONObject("arguments")
+                    CapabilityCommand(
+                        item.getString("capability"),
+                        arguments.keys().asSequence().associateWith { arguments.getString(it) }
+                    )
+                }
+            },
+            root.getLong("created"),
+            root.getString("label"),
+            previousConfiguration = if (schema >= 2 && root.has("previousConfiguration") && !root.isNull("previousConfiguration")) {
+                GlobalTuningConfigurationCodec.decode(root.getJSONObject("previousConfiguration"))
+            } else null
+        ).also { require(it.validationError() == null) { it.validationError().orEmpty() } }
     }
 }
 
@@ -150,7 +197,8 @@ class SharedPreferencesGlobalTuningRecoveryStore(context: Context) : GlobalTunin
 fun commitVerifiedGlobalTransaction(
     journalStore: SceneTransactionJournalStore,
     recoveryStore: GlobalTuningRecoveryStore,
-    label: String
+    label: String,
+    previousConfiguration: GlobalTuningConfiguration
 ): Boolean {
     val journal = (journalStore.load() as? SceneJournalLoad.Loaded)?.journal ?: return false
     if (journal.records.any { it.phase != SceneJournalPhase.APPLIED }) return false
@@ -158,7 +206,8 @@ fun commitVerifiedGlobalTransaction(
         journal.backend,
         journal.records.asReversed().map { it.rollback },
         System.currentTimeMillis(),
-        label
+        label,
+        previousConfiguration
     )
     if (!recoveryStore.save(plan)) return false
     return journalStore.clear(journal.transactionId, journal.revision)

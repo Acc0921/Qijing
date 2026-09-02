@@ -6,12 +6,12 @@
 
 | 模块 | 状态 | 已覆盖 | 尚缺内容 |
 | --- | --- | --- | --- |
-| C0 特权执行 | 🟡 | 统一 `ExecutionBroker`、dry-run、只读 ADB、Root transport、Shizuku SDK/UserService、显式后端选择、逐 policy CPU/swappiness 与固定第三方模式白名单、特权快照、参数校验和写后读回 | Root/Shizuku 真机真实写入、读回、恢复与撤权验收；ZRAM/daemon 继续关闭 |
+| C0 特权执行 | 🟡 | 统一 `ExecutionBroker`、dry-run、只读 ADB、Root/Shizuku、逐 policy CPU/swappiness、固定第三方模式、配置节点、刷新率、Root 线程命令及托管 limiter/Gesture worker；特权快照、进程/线程身份、CAS、写后读回和 journal 恢复完整 | 匹配设备上的真实写入、读回、恢复与撤权验收；`ddr_boost` 与 ZRAM 重建继续关闭 |
 | C1 场景引擎 | 🟡 | Usage Stats、轮询/服务、同源零写入 `prepare`、活跃场景、去重、冲突阻断、整批预检、特权快照、结构化运行轨迹、正式跨进程 journal、离场/切换/停止/事件源失效/进程重启恢复、逆序回滚 | Root/Shizuku 真机真实写闭环 |
 | C2 能力探测 | 🟡 | Android/SoC 基础信息、逐 CPU 核心与 policy、GPU、RAM/Swap/多 ZRAM、电池侧功耗、后端与第三方调度可用性、Root/Shizuku 固定能力的特权原值读取 | 真机按厂商/内核逐项验证指标可读性、可写性与恢复结果 |
 | C3 全新数据层 | ✅ | 新设备/完整 `AppEntry`/场景/遥测模型；遥测使用追加式会话文件与摊销压缩，场景/配置维持低频结构化存储；正式事务恢复计划、逐项阶段和未完成 journal 同步持久化 | 后续若查询关系复杂再评估 Room；不影响第一版安全闭环 |
 | C4 日志与任务 | 🟡 | task id、持久化审计日志、结构化场景事件、单调序号、SharedPreferences 观察、预检/快照/执行/验证/恢复关联；总览与场景页实时任务轨迹 | 真机异常注入下的轨迹与恢复告警人工核对 |
-| C5 新 UI | ✅ | Compose 单 Activity、Navigation Compose 五栏、系统返回栈、场景草稿 SavedStateHandle、自有主题/组件和稳定测试语义；API 23/API 35 模拟器均完成 13 项设备测试且 0 失败 | 后续继续拆分调节页面状态并做无障碍人工走查 |
+| C5 新 UI | ✅ | Compose 单 Activity、Navigation Compose 五栏、系统返回栈、场景草稿 SavedStateHandle、自有主题/组件和稳定测试语义；API 23/API 35 模拟器均完成 16 项设备测试且 0 失败 | 后续继续拆分调节页面状态并做无障碍人工走查 |
 
 ## 产品模块
 
@@ -20,7 +20,7 @@
 | M1 设备总览 | 🟡 | 型号、厂商、Android、后端与能力、Root/Shizuku/预演选择、Shizuku 显式授权、自动化服务、当前任务与命中/验证/恢复实时轨迹 | 真实后端逐项真机结论 |
 | M2 应用列表 | ✅ | 默认展示有桌面入口的前台触发对象；内部软件包位于专家范围并标记资格未知；后台扫描/图标解码，支持任务筛选并携带完整 `AppEntry` 进入 M3 | 最终商店分发时复核 Android 11+ 包可见性政策 |
 | M3 应用场景 | 🟡 | 场景链路工作台；应用→全局/指定/自定义意图→优先级→同源零写入预演→高风险确认→启用；命中→快照→写入/预览→读回→恢复结构化轨迹；正式 journal 在首次写入前同步落盘并支持重启恢复 | 真机真实写闭环与恢复告警人工验收 |
-| M4 CPU 与调度 | 🟡 | 省电/均衡/性能/极速全局模式；系统、Uperf、UperfGT、fas-rs 控制方；逐 policy Governor/频率自定义；每核频率/在线/负载、策略域和 GPU 只读状态；预览、快照、高风险确认、读回、失败恢复与可撤销计划 | 经用户授权的真机 Governor/频率/第三方模式实际写入、读回和恢复验收；GPU 与核心上下线写入保持关闭 |
+| M4 CPU 与调度 | 🟡 | 省电/均衡/性能/极速全局模式；系统、Uperf、UperfGT、fas-rs 与本地配置引擎；ZIP/变体选择、全宏 profile、CPU/GPU/WALT/cpuset/厂商节点、active/inactive、Root 线程 affinity/cpuset/RR/nice、动态 limiter 和 BTN_TOUCH 手势调度；逐项预演、快照、读回、健康检查与失败恢复 | 在匹配 8E/8E5 测试机完成真实模式、应用命中、托管 worker、新线程纳入与恢复验收；MIX 2S 只验证不兼容阻断 |
 | M5 内存与 ZRAM | 🟡 | RAM/Swap/多 ZRAM 设备、压缩数据和算法、电池电流/电压/温度/电池侧功率；swappiness 手动预览、范围校验、快照、高风险确认、读回与失败恢复链路 | swappiness 真机真实写入验收；ZRAM 重建在设备级恢复方案通过前保持关闭 |
 | M8 FPS 监控 | 🟡 | Android 7+ 当前窗口 FrameMetrics 采集；FPS 按真实经过时间计算，新会话保存逐帧分布并计算真实 P95，旧会话降级标注窗口 P95；追加式历史、摘要与 CSV | 长时真机性能/生命周期观察；外部应用 FPS 不得与当前窗口指标混称 |
 
@@ -31,16 +31,16 @@
 - `SceneEngine.prepare` 与真实应用使用同一计划、白名单与快照来源，但不执行任何写入；预演通过不等于已生效。
 - 场景保存默认不启用；真实启用前必须预演并经过高风险确认；相同应用的同优先级冲突会阻断启用。
 - Root/Shizuku 已可执行特权快照读取，不能再描述为“仅普通 sysfs/proc 快照”；但真实写入尚未在真机执行。
-- M4/M5 已具备全局四档、逐 policy 自定义、第三方固定调度、CPU/GPU/内存/ZRAM/功耗观察与手动安全调节，不能再描述为“只有只读状态和参数契约”。
-- Compose UI、导航/草稿、持久服务状态和正式 journal 契约已在 API 23 与 API 35 模拟器实际运行：两台设备均完成 13 项且 0 失败，Root-only 按条件跳过；JVM 108 项、Lint 0 error 与 Debug/Release 构建通过。不能称为真机写入通过。
+- M4/M5 已具备全局四档、逐 policy 自定义、第三方固定调度、本地配置包与 Root 线程编排、CPU/GPU/内存/ZRAM/功耗观察和事务调节，不能再描述为“只有只读状态和参数契约”。
+- Compose UI、导航/草稿、持久服务状态、正式 journal 和托管 shell 语法契约已在 API 23 与 API 35 模拟器实际运行：两台设备均完成 16 项且 0 失败，Root-only 按条件跳过；JVM 223 项通过、1 项按环境跳过，Lint 0 error，Debug/Release 构建通过。不能称为真机写入通过。
 
 ## 当前发布阻塞项
 
-1. **真机真实写入**：Root/Shizuku 已有白名单、特权快照、正式 journal、读回和恢复代码，但尚未在明确授权的真机执行逐 policy CPU、swappiness 与第三方调度模式写入和恢复。
+1. **真机真实写入**：Root/Shizuku 已有类型化命令、特权快照、正式 journal、读回和恢复代码，但尚未在明确授权的匹配设备执行配置包节点、线程编排、逐 policy CPU、swappiness 与第三方模式写入和恢复。
 2. **真机异常与长时体验验收**：仍需在授权设备核对撤权、进程中断、部分恢复失败的页面轨迹，以及 FPS 长时采集和生命周期。
 3. **分发政策**：若进入 Google Play，需要申报 `specialUse` FGS 与全包可见性用途；当前 GitHub 侧载构建通过不等于商店审核通过。
 
-ZRAM 重建、任意 shell、daemon、外部应用 FPS 和旧数据迁移仍按第一版边界关闭，不作为上述三项完成度的替代目标。
+ZRAM 重建、配置外任意 Shell、外部应用 FPS 和旧数据迁移仍按第一版边界关闭，不作为上述三项完成度的替代目标。
 
 ## 后续实施顺序
 

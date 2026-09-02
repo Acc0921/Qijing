@@ -55,10 +55,11 @@ class MainActivityTest {
         composeRule.onNodeWithTag("global-mode-row").performScrollTo().performClick()
         composeRule.onNodeWithText("极速").assertIsDisplayed()
         composeRule.onNodeWithText("极速").performClick()
+        composeRule.onNodeWithTag("tuning-list").performScrollToNode(hasTestTag("tuning-tab-gpu"))
         composeRule.onNodeWithTag("tuning-tab-gpu").performClick()
-        composeRule.onNodeWithText("GPU 实时状态").assertIsDisplayed()
+        composeRule.onNodeWithText("GPU 实时状态").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("tuning-tab-power").performClick()
-        composeRule.onNodeWithText("电池侧功耗").assertIsDisplayed()
+        composeRule.onNodeWithText("电池侧功耗").performScrollTo().assertIsDisplayed()
     }
 
     @Test

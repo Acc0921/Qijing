@@ -7,13 +7,24 @@ import android.app.Service
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import com.qijing.core.data.SharedPreferencesNewDataStore
+import com.qijing.core.device.observation.CpuObservationReader
 import com.qijing.core.execution.BackendPreference
 import com.qijing.core.execution.BackendRuntime
 import com.qijing.core.execution.BackendRuntimeFactory
+import com.qijing.core.execution.ManagedRuntimeHealthFailure
+import com.qijing.core.execution.ManagedRuntimeHealthPolicy
 import com.qijing.core.logging.SharedPreferencesTaskLogStore
 import com.qijing.core.logging.TaskLog
 import com.qijing.core.model.ExecutionBackend
+import com.qijing.core.model.SceneProfile
+import com.qijing.core.scheduler.profile.InstalledProfileSceneExpander
+import com.qijing.feature.tuning.profile.GlobalAutomationApprovalStore
+import com.qijing.feature.tuning.profile.GlobalAutomationSceneFactory
+import com.qijing.feature.tuning.profile.GlobalAutomationSceneResolution
+import com.qijing.feature.tuning.profile.GlobalTuningLoad
+import com.qijing.feature.tuning.profile.SharedPreferencesGlobalTuningProfileStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +34,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
@@ -43,6 +55,13 @@ class SceneTriggerService : Service() {
     @Volatile private var shutdownFinalized = false
     @Volatile private var initialized = false
     @Volatile private var recoveryRequired = false
+    @Volatile private var lastInteractive: Boolean? = null
+    private val reconciliationMutex = Mutex()
+    private var observedThreadPackage: String? = null
+    private var observedThreadIdentities: Set<String> = emptySet()
+    private var lastGlobalFallbackIssue: String? = null
+    private var healthTransactionId: String? = null
+    private var lastHealthCheckAtMs: Long = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -110,9 +129,28 @@ class SceneTriggerService : Service() {
             }
         }
         val store = SharedPreferencesNewDataStore(this)
+        val globalProfileStore = SharedPreferencesGlobalTuningProfileStore(this)
+        val globalApprovalStore = GlobalAutomationApprovalStore(this)
+        val globalSceneFactory = GlobalAutomationSceneFactory()
+        val cpuReader = CpuObservationReader()
         val selectedRuntime = BackendRuntimeFactory.create(this, selectedBackend).also { runtime = it }
-        val snapshots = selectedRuntime.readCapability?.let { reader -> SceneSnapshotManager(CapabilityValueReader(reader)) }
-        val engine = SceneEngine(selectedRuntime.broker, taskLogs, snapshots, transactionJournal, taskEvents)
+        val powerManager = getSystemService(PowerManager::class.java)
+        val snapshots = selectedRuntime.readCommand?.let { reader -> SceneSnapshotManager(CommandValueReader(reader)) }
+            ?: selectedRuntime.readCapability?.let { reader -> SceneSnapshotManager(CapabilityValueReader(reader)) }
+        val engine = SceneEngine(
+            selectedRuntime.broker,
+            taskLogs,
+            snapshots,
+            transactionJournal,
+            taskEvents,
+            InstalledProfileSceneExpander(
+                this,
+                selectedRuntime.readCommand,
+                enableThreadRuntime = selectedBackend == ExecutionBackend.ROOT,
+                phaseProvider = { powerManager.isInteractive.let { if (it) com.qijing.core.scheduler.profile.ProfilePhase.ACTIVE else com.qijing.core.scheduler.profile.ProfilePhase.INACTIVE } },
+                executionBackend = selectedBackend
+            )
+        )
         val sceneCoordinator = SceneActivationCoordinator(
             SceneSelector(),
             engine,
@@ -124,14 +162,60 @@ class SceneTriggerService : Service() {
             source = source,
             onSourceUnavailable = {
                 scope.launch {
-                    val result = runCatching { sceneCoordinator.restoreActive("foreground-source-unavailable") }.getOrNull()
-                    handleRuntimeResult(result, "前台应用来源失效")
+                    try {
+                        val result = sceneCoordinator.restoreActive("foreground-source-unavailable")
+                        handleRuntimeResult(result, "前台应用来源失效")
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Throwable) {
+                        handleRuntimeException(error, "前台应用来源失效恢复")
+                    }
                 }
             }
         ) { packageName ->
             scope.launch {
-                val result = runCatching { sceneCoordinator.onForeground(packageName, store.scenes()) }.getOrNull()
+                if (!reconciliationMutex.tryLock()) return@launch
+                try {
+                managedRuntimeFailure(sceneCoordinator, selectedBackend, selectedRuntime)?.let { failure ->
+                    handleManagedRuntimeFailure(sceneCoordinator, failure)
+                    return@launch
+                }
+                val interactive = powerManager.isInteractive
+                val phaseChanged = lastInteractive?.let { it != interactive } == true
+                lastInteractive = interactive
+                if (phaseChanged) observedThreadIdentities = emptySet()
+                val threadPopulationChanged = interactive && !phaseChanged && shouldReconcileThreads(
+                    packageName,
+                    sceneCoordinator,
+                    selectedBackend,
+                    selectedRuntime
+                )
+                if ((phaseChanged || threadPopulationChanged) && sceneCoordinator.activeScene != null) {
+                    val restoreReason = if (phaseChanged) "interaction-state-change" else "thread-population-change"
+                    val restore = sceneCoordinator.restoreActive(restoreReason)
+                    handleRuntimeResult(restore, if (phaseChanged) "活动状态切换恢复" else "新线程纳入前恢复")
+                    if (restore !is SceneLifecycleResult.Restored) return@launch
+                }
+                val scenes = buildList {
+                    addAll(store.scenes())
+                    globalFallbackScene(
+                        packageName,
+                        selectedBackend,
+                        globalProfileStore,
+                        globalApprovalStore,
+                        globalSceneFactory,
+                        cpuReader
+                    )?.let(::add)
+                }
+                val result = sceneCoordinator.onForeground(packageName, scenes)
                 handleRuntimeResult(result, "场景协调")
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    handleRuntimeException(error, "场景协调")
+                } finally {
+                    reconciliationMutex.unlock()
+                }
             }
         }.also { it.start() }
     }
@@ -285,6 +369,164 @@ class SceneTriggerService : Service() {
         stopSelf()
     }
 
+    private fun handleRuntimeException(error: Throwable, reason: String) {
+        val detail = SceneRuntimeFailurePolicy.recoveryDetail(reason, error)
+        recoveryRequired = true
+        serviceState.markRecoveryRequired(serviceBackend, detail)
+        val pending = transactionJournal.load()
+        val journal = (pending as? SceneJournalLoad.Loaded)?.journal
+        val taskId = journal?.transactionId ?: "runtime-exception-${System.currentTimeMillis()}"
+        taskLogs.append(TaskLog(taskId, "recovery-required", detail, false, System.currentTimeMillis()))
+        taskEvents.append(
+            SceneTaskEvent(
+                taskId = taskId,
+                sceneId = journal?.sceneId ?: "unknown",
+                sceneName = journal?.sceneName ?: "未完成事务",
+                packageName = journal?.packageName,
+                backend = serviceBackend,
+                phase = SceneTaskPhase.RECOVERY_REQUIRED,
+                detail = detail
+            )
+        )
+        polling?.stop()
+        polling = null
+        heartbeat?.cancel()
+        heartbeat = null
+        stopSelf()
+    }
+
+    private suspend fun shouldReconcileThreads(
+        packageName: String,
+        coordinator: SceneActivationCoordinator,
+        backend: ExecutionBackend,
+        runtime: BackendRuntime
+    ): Boolean {
+        val active = coordinator.activeScene?.scene
+        if (backend != ExecutionBackend.ROOT || active?.schedulerProvider != com.qijing.core.scheduler.SchedulerProviderId.QIJING_PROFILE) {
+            observedThreadPackage = null
+            observedThreadIdentities = emptySet()
+            return false
+        }
+        if (observedThreadPackage != packageName) {
+            observedThreadPackage = packageName
+            observedThreadIdentities = emptySet()
+        }
+        val raw = runtime.readCommand?.invoke(
+            com.qijing.core.execution.CapabilityCommand("scheduler.thread.snapshot", mapOf("package" to packageName))
+        ) ?: return false
+        val identities = raw.lineSequence().mapNotNull { line ->
+            val fields = line.split('|')
+            if (fields.size == 11) fields.take(4).joinToString(":") else null
+        }.toSet()
+        if (identities.isEmpty()) return false
+        val added = observedThreadIdentities.isNotEmpty() && identities.any { it !in observedThreadIdentities }
+        observedThreadIdentities = identities
+        return added
+    }
+
+    private suspend fun managedRuntimeFailure(
+        coordinator: SceneActivationCoordinator,
+        backend: ExecutionBackend,
+        runtime: BackendRuntime
+    ): ManagedRuntimeHealthFailure? {
+        if (backend != ExecutionBackend.ROOT) return null
+        val active = coordinator.activeScene ?: run {
+            healthTransactionId = null
+            lastHealthCheckAtMs = 0L
+            return null
+        }
+        val reader = runtime.readCommand ?: return ManagedRuntimeHealthFailure("托管调度", null)
+        val transactionId = active.transaction.plan.id
+        val now = System.currentTimeMillis()
+        if (healthTransactionId == transactionId && now - lastHealthCheckAtMs < MANAGED_HEALTH_INTERVAL_MS) return null
+        healthTransactionId = transactionId
+        lastHealthCheckAtMs = now
+        val appliedCommands = active.transaction.plan.commands.take(active.transaction.applied.size)
+        return ManagedRuntimeHealthPolicy.firstFailure(appliedCommands, reader)
+    }
+
+    private suspend fun handleManagedRuntimeFailure(
+        coordinator: SceneActivationCoordinator,
+        failure: ManagedRuntimeHealthFailure
+    ) {
+        polling?.stop()
+        polling = null
+        heartbeat?.cancel()
+        heartbeat = null
+        val active = coordinator.activeScene
+        val taskId = active?.transaction?.plan?.id ?: "managed-runtime-${System.currentTimeMillis()}"
+        val restore = coordinator.restoreActive("managed-runtime-unhealthy")
+        if (restore is SceneLifecycleResult.Restored || restore is SceneLifecycleResult.Idle) {
+            val detail = "${failure.detail}；已恢复场景原值并停止自动化，请检查任务记录后再启动"
+            serviceState.markStopped(detail)
+            taskLogs.append(TaskLog(taskId, "managed-runtime-unhealthy", detail, false, System.currentTimeMillis()))
+            taskEvents.append(
+                SceneTaskEvent(
+                    taskId = taskId,
+                    sceneId = active?.scene?.id ?: "unknown",
+                    sceneName = active?.scene?.name ?: "托管调度",
+                    packageName = active?.scene?.packageNames?.firstOrNull(),
+                    backend = serviceBackend,
+                    phase = SceneTaskPhase.RESTORED,
+                    detail = detail
+                )
+            )
+            shutdownFinalized = true
+            stopSelf()
+        } else {
+            handleRuntimeResult(restore, failure.detail)
+        }
+    }
+
+    private fun globalFallbackScene(
+        packageName: String,
+        backend: ExecutionBackend,
+        profileStore: SharedPreferencesGlobalTuningProfileStore,
+        approvalStore: GlobalAutomationApprovalStore,
+        factory: GlobalAutomationSceneFactory,
+        cpuReader: CpuObservationReader
+    ): SceneProfile? {
+        val configuration = when (val loaded = profileStore.load()) {
+            GlobalTuningLoad.None -> return null
+            is GlobalTuningLoad.Corrupt -> {
+                reportGlobalFallbackIssue("全局模式配置损坏：${loaded.reason}")
+                return null
+            }
+            is GlobalTuningLoad.Loaded -> loaded.configuration
+        }
+        if (!approvalStore.isApproved(configuration, backend)) {
+            reportGlobalFallbackIssue("全局模式尚未使用当前执行方式完成预演或写入验证；仅运行已启用的应用场景")
+            return null
+        }
+        val cpu = if (configuration.provider == com.qijing.core.scheduler.SchedulerProviderId.SYSTEM) {
+            cpuReader.read()
+        } else null
+        return when (val resolved = factory.resolve(configuration, packageName, cpu)) {
+            is GlobalAutomationSceneResolution.Ready -> {
+                lastGlobalFallbackIssue = null
+                resolved.scene
+            }
+            is GlobalAutomationSceneResolution.Blocked -> {
+                reportGlobalFallbackIssue("全局模式未参与自动化：${resolved.reason}")
+                null
+            }
+        }
+    }
+
+    private fun reportGlobalFallbackIssue(detail: String) {
+        if (lastGlobalFallbackIssue == detail) return
+        lastGlobalFallbackIssue = detail
+        taskLogs.append(
+            TaskLog(
+                UUID.randomUUID().toString(),
+                "global-fallback-blocked",
+                detail,
+                false,
+                System.currentTimeMillis()
+            )
+        )
+    }
+
     private fun finishJournalWithoutRecovery(journal: SceneTransactionJournal) {
         startForeground(NOTIFICATION_ID, notification(journal.backend))
         val detail = if (transactionJournal.clear(journal.transactionId, journal.revision)) {
@@ -330,7 +572,11 @@ class SceneTriggerService : Service() {
             val result = try {
                 recoveryRuntime = BackendRuntimeFactory.create(this@SceneTriggerService, journal.backend)
                 withTimeoutOrNull(RESTORE_TIMEOUT_MS) {
-                    SceneJournalRecovery(transactionJournal, recoveryRuntime.broker).recoverPending()
+                    SceneJournalRecovery(
+                        transactionJournal,
+                        recoveryRuntime.broker,
+                        recoveryRuntime.readCommand?.let(::CommandValueReader)
+                    ).recoverPending()
                 }
             } catch (error: CancellationException) {
                 throw error
@@ -364,5 +610,19 @@ class SceneTriggerService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val RESTORE_TIMEOUT_MS = 30_000L
         private const val HEARTBEAT_INTERVAL_MS = 15_000L
+        private const val MANAGED_HEALTH_INTERVAL_MS = 10_000L
+    }
+}
+
+internal object SceneRuntimeFailurePolicy {
+    fun recoveryDetail(reason: String, error: Throwable): String {
+        val safeReason = reason.trim().take(80).ifBlank { "自动化运行" }
+        val safeError = (error.message ?: error::class.java.simpleName)
+            .replace('\n', ' ')
+            .replace('\r', ' ')
+            .trim()
+            .take(240)
+            .ifBlank { "未知异常" }
+        return "$safeReason 异常：$safeError；已停止新的场景协调并锁定真实执行，请按事务记录恢复"
     }
 }

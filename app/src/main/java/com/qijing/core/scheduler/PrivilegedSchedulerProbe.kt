@@ -12,11 +12,19 @@ class PrivilegedSchedulerProbe(
                 detail = "栖境系统调节器"
             )
         }
+        if (provider == SchedulerProviderId.QIJING_PROFILE) {
+            return SchedulerProbeResult(
+                provider,
+                SchedulerAvailability.DETECTED,
+                detail = "栖境配置包由本地导入状态决定"
+            )
+        }
         val capability = when (provider) {
             SchedulerProviderId.UPERF -> "scheduler.uperf.probe"
             SchedulerProviderId.UPERF_GT -> "scheduler.uperf_gt.probe"
             SchedulerProviderId.FAS_RS -> "scheduler.fas_rs.probe"
             SchedulerProviderId.CONFIG_BRIDGE -> "scheduler.config_bridge.probe"
+            SchedulerProviderId.QIJING_PROFILE -> error("handled above")
             SchedulerProviderId.SYSTEM -> error("handled above")
         }
         val raw = readCapability(capability)
@@ -28,6 +36,7 @@ class PrivilegedSchedulerProbe(
             SchedulerProviderId.UPERF_GT -> "uperf" to "Uperf Game Turbo"
             SchedulerProviderId.FAS_RS -> "fas-rs" to "fas-rs"
             SchedulerProviderId.CONFIG_BRIDGE -> "Scene_Config_replace" to "若晴· Scene二改调度线程"
+            SchedulerProviderId.QIJING_PROFILE -> error("handled above")
             SchedulerProviderId.SYSTEM -> error("handled above")
         }
         if (lines[0] != expected.first || lines[1] != expected.second) {

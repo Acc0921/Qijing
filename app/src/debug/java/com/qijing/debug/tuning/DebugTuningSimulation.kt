@@ -199,7 +199,8 @@ class DebugTuningExecutionBroker(
             return@executeLocked injectedFailure(command, DebugFailurePhase.READBACK_MISMATCH)
         }
 
-        val expected = command.arguments.values.single()
+        val expected = command.arguments["value"] ?: command.arguments["khz"]
+            ?: return@executeLocked ExecutionResult.Failed("SIM_INVALID_ARGUMENT", "模拟命令缺少目标值", command.rollback)
         val actual = valueFor(after, command.capability)
         if (actual != expected) {
             return@executeLocked ExecutionResult.Failed("SIM_READBACK_MISMATCH", "模拟写入读回不一致", command.rollback)
@@ -219,7 +220,12 @@ class DebugTuningExecutionBroker(
 
     private fun projectedValues(values: DebugTuningValues, command: CapabilityCommand): Result<DebugTuningValues> = runCatching {
         val base = command.capability.removeSuffix(RESTORE_SUFFIX)
-        val raw = command.arguments.values.single()
+        val raw = command.arguments["value"] ?: command.arguments["khz"] ?: error("命令缺少目标值")
+        if (command.capability.endsWith(RESTORE_SUFFIX)) {
+            val expected = command.arguments["expected"] ?: error("恢复命令缺少预期已应用值")
+            val current = valueFor(values, base) ?: error("无法读取恢复前状态")
+            require(current == raw || current == expected) { "当前值与恢复契约冲突" }
+        }
         val projected = when (base) {
             GOVERNOR -> values.copy(governor = raw)
             MIN_FREQUENCY -> values.copy(minFrequencyKHz = raw.toLong())

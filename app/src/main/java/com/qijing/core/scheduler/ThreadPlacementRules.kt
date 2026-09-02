@@ -6,6 +6,11 @@ import org.json.JSONObject
 class CpuSet private constructor(val cores: Set<Int>) {
     val canonical: String = cores.sorted().joinToString(",")
 
+    /** CPU masks are values; independently observed masks with the same cores must compare equally. */
+    override fun equals(other: Any?): Boolean = other is CpuSet && cores == other.cores
+    override fun hashCode(): Int = cores.hashCode()
+    override fun toString(): String = canonical
+
     companion object {
         fun parse(raw: String, availableCores: Set<Int>): CpuSet? {
             if (raw.isBlank() || raw.length > 128 || availableCores.isEmpty()) return null
@@ -51,10 +56,27 @@ class ThreadNamePattern private constructor(
     }
 }
 
+private fun ThreadNamePattern.overlaps(other: ThreadNamePattern): Boolean = when {
+    !prefix && !other.prefix -> value == other.value
+    prefix && other.prefix -> value.startsWith(other.value) || other.value.startsWith(value)
+    prefix -> other.value.startsWith(value)
+    else -> value.startsWith(other.value)
+}
+
 data class ThreadPlacementRule(
     val matcher: ThreadNamePattern,
-    val cpuSet: CpuSet
+    val cpuSet: CpuSet,
+    val source: ThreadPlacementSource = ThreadPlacementSource.COMM
 )
+
+enum class ThreadPlacementSource {
+    MAIN_THREAD,
+    UNITY_MAIN,
+    COMM,
+    HEAVY_THREAD,
+    TRASHY,
+    FALLBACK
+}
 
 data class AppThreadPlacementProfile(
     val label: String,
@@ -62,7 +84,10 @@ data class AppThreadPlacementProfile(
     val rules: List<ThreadPlacementRule>,
     val fallback: CpuSet,
     val roundRobinMatchers: List<ThreadNamePattern> = emptyList(),
-    val niceMatchers: List<ThreadNamePattern> = emptyList()
+    val niceMatchers: List<ThreadNamePattern> = emptyList(),
+    val mainThreadCpuSet: CpuSet? = null,
+    val trashyMatchers: List<ThreadNamePattern> = emptyList(),
+    val trashyCpuSet: CpuSet = fallback
 )
 
 data class ThreadPlacementDecision(
@@ -70,7 +95,14 @@ data class ThreadPlacementDecision(
     val cpuSet: CpuSet,
     val matchedPattern: ThreadNamePattern?,
     val requestRoundRobin: Boolean,
-    val requestNiceAdjustment: Boolean
+    val requestNiceAdjustment: Boolean,
+    val placementSource: ThreadPlacementSource = if (matchedPattern == null) {
+        ThreadPlacementSource.FALLBACK
+    } else {
+        ThreadPlacementSource.COMM
+    },
+    val trashyPattern: ThreadNamePattern? = null,
+    val requestTrashyDemotion: Boolean = trashyPattern != null
 )
 
 sealed interface ThreadPlacementLoad {
@@ -81,15 +113,31 @@ sealed interface ThreadPlacementLoad {
 class ThreadPlacementRuleSet private constructor(
     val profiles: List<AppThreadPlacementProfile>
 ) {
-    fun decide(packageName: String, threadName: String): ThreadPlacementDecision? {
+    fun decide(
+        packageName: String,
+        threadName: String,
+        isProcessMainThread: Boolean = false
+    ): ThreadPlacementDecision? {
         val profile = profiles.firstOrNull { packageName in it.packageNames } ?: return null
-        val matched = profile.rules.firstOrNull { it.matcher.matches(threadName) }
+        val explicit = profile.rules.firstOrNull { it.matcher.matches(threadName) }
+        val trashy = profile.trashyMatchers.firstOrNull { it.matches(threadName) }
+        val mainThreadCpuSet = profile.mainThreadCpuSet.takeIf { isProcessMainThread }
+        val cpuSet = mainThreadCpuSet ?: explicit?.cpuSet ?: profile.trashyCpuSet.takeIf { trashy != null } ?: profile.fallback
+        val source = when {
+            mainThreadCpuSet != null -> ThreadPlacementSource.MAIN_THREAD
+            explicit != null -> explicit.source
+            trashy != null -> ThreadPlacementSource.TRASHY
+            else -> ThreadPlacementSource.FALLBACK
+        }
         return ThreadPlacementDecision(
             profileLabel = profile.label,
-            cpuSet = matched?.cpuSet ?: profile.fallback,
-            matchedPattern = matched?.matcher,
+            cpuSet = cpuSet,
+            matchedPattern = explicit?.matcher ?: trashy,
             requestRoundRobin = profile.roundRobinMatchers.any { it.matches(threadName) },
-            requestNiceAdjustment = profile.niceMatchers.any { it.matches(threadName) }
+            requestNiceAdjustment = profile.niceMatchers.any { it.matches(threadName) },
+            placementSource = source,
+            trashyPattern = trashy,
+            requestTrashyDemotion = trashy != null
         )
     }
 
@@ -104,11 +152,29 @@ class ThreadPlacementRuleSet private constructor(
                     return ThreadPlacementLoad.Rejected("${profile.label} 的应用数量无效")
                 }
                 if (profile.rules.size > MAX_RULES_PER_PROFILE) return ThreadPlacementLoad.Rejected("${profile.label} 的线程规则过多")
+                if (profile.trashyMatchers.size > MAX_RULES_PER_PROFILE) return ThreadPlacementLoad.Rejected("${profile.label} 的低优先级线程规则过多")
                 if (profile.packageNames.any { !PACKAGE_NAME.matches(it) }) return ThreadPlacementLoad.Rejected("${profile.label} 包含无效包名")
                 val duplicate = profile.packageNames.firstOrNull { !packages.add(it) }
                 if (duplicate != null) return ThreadPlacementLoad.Rejected("包名 $duplicate 同时属于多个线程配置")
                 val duplicateMatcher = profile.rules.groupBy { it.matcher }.entries.firstOrNull { it.value.size > 1 }
                 if (duplicateMatcher != null) return ThreadPlacementLoad.Rejected("${profile.label} 包含重复线程匹配规则")
+                if (profile.trashyMatchers.distinct().size != profile.trashyMatchers.size) {
+                    return ThreadPlacementLoad.Rejected("${profile.label} 包含重复低优先级线程规则")
+                }
+                if (profile.trashyMatchers.any { demoted ->
+                        profile.roundRobinMatchers.any { demoted.overlaps(it) } ||
+                            profile.niceMatchers.any { demoted.overlaps(it) }
+                    }
+                ) {
+                    return ThreadPlacementLoad.Rejected("${profile.label} 的低优先级线程同时请求了提权")
+                }
+                val unityMainTargets = profile.rules
+                    .filter { it.source == ThreadPlacementSource.UNITY_MAIN }
+                    .map { it.cpuSet }
+                    .distinct()
+                if (profile.mainThreadCpuSet != null && unityMainTargets.any { it != profile.mainThreadCpuSet }) {
+                    return ThreadPlacementLoad.Rejected("${profile.label} 的 main_thread 与 unity_main CPU 归属冲突")
+                }
             }
             return ThreadPlacementLoad.Loaded(ThreadPlacementRuleSet(profiles))
         }
@@ -146,6 +212,11 @@ class ThreadPlacementJsonParser {
         val packages = root.optJSONArray("packages")?.toStringSet(MAX_PACKAGES_PER_PROFILE) ?: return null
         val placement = root.optJSONObject("cpuset") ?: return null
         val fallback = CpuSet.parse(placement.opt("other") as? String ?: return null, availableCores) ?: return null
+        val mainThreadCpuSet = optionalCpuSet(placement, "main_thread", availableCores) ?: return null
+        val unityMainCpuSet = optionalCpuSet(placement, "unity_main", availableCores) ?: return null
+        if (mainThreadCpuSet.value != null && unityMainCpuSet.value != null && mainThreadCpuSet.value != unityMainCpuSet.value) {
+            return null
+        }
         val rules = mutableListOf<ThreadPlacementRule>()
         val comm = placement.optJSONObject("comm")
         if (comm != null) {
@@ -154,20 +225,61 @@ class ThreadPlacementJsonParser {
             keys.forEach { cpuSetRaw ->
                 val cpuSet = CpuSet.parse(cpuSetRaw, availableCores) ?: return null
                 val matchers = comm.optJSONArray(cpuSetRaw)?.toPatterns(MAX_PATTERNS_PER_GROUP) ?: return null
-                matchers.forEach { rules += ThreadPlacementRule(it, cpuSet) }
+                matchers.forEach { rules += ThreadPlacementRule(it, cpuSet, ThreadPlacementSource.COMM) }
             }
+        }
+        val heavyCores = (placement.opt("heavy_cores") as? String)?.let { CpuSet.parse(it, availableCores) }
+        val heavyNames = (placement.opt("heavy_thread") as? String)?.split(';')
+            ?.map(String::trim)?.filter(String::isNotEmpty).orEmpty()
+        if (heavyNames.isNotEmpty() && heavyCores == null) return null
+        heavyNames.forEach { name ->
+            val matcher = ThreadNamePattern.parse(if (name.endsWith('*')) name else "$name*") ?: return null
+            rules += ThreadPlacementRule(matcher, heavyCores!!, ThreadPlacementSource.HEAVY_THREAD)
+        }
+        unityMainCpuSet.value?.let { cpuSet ->
+            rules += ThreadPlacementRule(
+                ThreadNamePattern.parse("UnityMain*")!!,
+                cpuSet,
+                ThreadPlacementSource.UNITY_MAIN
+            )
+        }
+        val conflicts = rules.groupBy { it.matcher }.values.any { matches ->
+            matches.map { it.cpuSet }.distinct().size > 1
+        }
+        if (conflicts) return null
+        val roundRobin = if (placement.has("rr")) {
+            placement.optJSONArray("rr")?.toPatterns(MAX_FLAG_PATTERNS) ?: return null
+        } else emptyList()
+        val nice = if (placement.has("ni")) {
+            placement.optJSONArray("ni")?.toPatterns(MAX_FLAG_PATTERNS) ?: return null
+        } else emptyList()
+        val trashy = if (placement.has("trashy")) {
+            placement.optJSONArray("trashy")?.toPatterns(MAX_FLAG_PATTERNS) ?: return null
+        } else emptyList()
+        if (trashy.any { demoted -> roundRobin.any { demoted.overlaps(it) } || nice.any { demoted.overlaps(it) } }) {
+            return null
         }
         return AppThreadPlacementProfile(
             label = label,
             packageNames = packages,
-            rules = rules.sortedWith(
+            rules = rules.distinctBy { it.matcher }.sortedWith(
                 compareBy<ThreadPlacementRule> { it.matcher.prefix }
                     .thenByDescending { it.matcher.value.length }
             ),
             fallback = fallback,
-            roundRobinMatchers = placement.optJSONArray("rr")?.toPatterns(MAX_FLAG_PATTERNS).orEmpty(),
-            niceMatchers = placement.optJSONArray("ni")?.toPatterns(MAX_FLAG_PATTERNS).orEmpty()
+            roundRobinMatchers = roundRobin,
+            niceMatchers = nice,
+            mainThreadCpuSet = mainThreadCpuSet.value,
+            trashyMatchers = trashy,
+            trashyCpuSet = fallback
         )
+    }
+
+    /** Distinguishes an absent optional key from a present but invalid value. */
+    private fun optionalCpuSet(root: JSONObject, key: String, availableCores: Set<Int>): OptionalCpuSet? {
+        if (!root.has(key)) return OptionalCpuSet(null)
+        val raw = root.opt(key) as? String ?: return null
+        return CpuSet.parse(raw, availableCores)?.let(::OptionalCpuSet)
     }
 
     private fun JSONArray.toStringSet(limit: Int): Set<String>? {
@@ -196,4 +308,6 @@ class ThreadPlacementJsonParser {
         const val MAX_PATTERNS_PER_GROUP = 128
         const val MAX_FLAG_PATTERNS = 128
     }
+
+    private data class OptionalCpuSet(val value: CpuSet?)
 }

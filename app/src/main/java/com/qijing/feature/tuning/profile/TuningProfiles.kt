@@ -52,7 +52,9 @@ data class GlobalTuningConfiguration(
     val provider: SchedulerProviderId = SchedulerProviderId.SYSTEM,
     val customProfiles: List<CustomTuningProfile> = emptyList(),
     val revision: Long = 0L,
-    val updatedAtMs: Long = 0L
+    val updatedAtMs: Long = 0L,
+    /** False when system values were restored from a legacy plan that did not record their UI intent. */
+    val selectionKnown: Boolean = true
 ) {
     fun validationError(): String? = when {
         revision < 0L -> "全局方案 revision 无效"

@@ -7,17 +7,31 @@ import com.qijing.core.execution.ExecutionBackendProvider
 import com.qijing.core.execution.ExecutionBroker
 import com.qijing.core.execution.ExecutionResult
 import com.qijing.core.execution.PrivilegedWriteCommandMapper
+import com.qijing.core.execution.ManagedLimiterRuntime
+import com.qijing.core.execution.ProfileLimiterCommandPolicy
 import com.qijing.core.model.ExecutionBackend
 import com.qijing.core.model.SceneProfile
+import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 
 enum class SceneJournalPhase { PENDING, WRITE_STARTED, APPLIED, RESTORED }
 
+internal object LinuxBootIdentity {
+    private val FORMAT = Regex("[A-Fa-f0-9-]{16,64}")
+
+    fun current(): String? = runCatching {
+        File("/proc/sys/kernel/random/boot_id").readText().trim().takeIf(FORMAT::matches)
+    }.getOrNull()
+}
+
 data class SceneJournalRecord(
     val capability: String,
     val rollback: CapabilityCommand,
-    val phase: SceneJournalPhase = SceneJournalPhase.PENDING
+    val phase: SceneJournalPhase = SceneJournalPhase.PENDING,
+    val target: CapabilityCommand? = null,
+    val originalValue: String? = null,
+    val appliedValue: String? = null
 )
 
 data class SceneTransactionJournal(
@@ -28,19 +42,58 @@ data class SceneTransactionJournal(
     val backend: ExecutionBackend,
     val records: List<SceneJournalRecord>,
     val createdAtMs: Long,
-    val revision: Long = 0L
+    val revision: Long = 0L,
+    /** Schema 1 records predate target/original/applied state and are recovered conservatively. */
+    val schemaVersion: Int = 1,
+    /** Linux boot identity at creation; same-boot WRITE_STARTED recovery cannot prove a timed-out writer stopped. */
+    val bootId: String? = null
 ) {
     fun validationError(): String? = when {
         transactionId.isBlank() || sceneId.isBlank() -> "事务或场景标识为空"
         revision < 0L -> "journal revision 无效"
+        schemaVersion !in 1..CURRENT_SCHEMA -> "journal schema 无效"
         backend !in setOf(ExecutionBackend.ROOT, ExecutionBackend.SHIZUKU) -> "journal 只允许真实执行后端"
         records.isEmpty() || records.size > MAX_RECORDS -> "journal 命令数量无效"
         records.any { it.capability.isBlank() || it.rollback.capability != "${it.capability}.restore" } -> "恢复命令与能力不匹配"
-        records.any { PrivilegedWriteCommandMapper.map(it.rollback) !is PrivilegedWriteCommandMapper.Result.Command } -> "恢复命令不在安全白名单"
+        schemaVersion >= 2 && records.any {
+            PrivilegedWriteCommandMapper.map(it.rollback) !is PrivilegedWriteCommandMapper.Result.Command
+        } -> "恢复命令不在安全白名单"
+        schemaVersion == 1 && records.any { record ->
+            record.rollback.arguments.size > 64 || record.rollback.arguments.any { (key, value) ->
+                key.length !in 1..64 || value.length !in 1..4_096 || '\u0000' in key || '\u0000' in value
+            }
+        } -> "旧版 journal 参数越界"
+        schemaVersion >= 2 && records.any { record ->
+            record.target == null || record.target.capability != record.capability || record.target.rollback != null ||
+                record.originalValue.isNullOrEmpty() || record.appliedValue.isNullOrEmpty()
+        } -> "journal 缺少写入三态恢复数据"
+        schemaVersion >= 2 && records.any { record ->
+            PrivilegedWriteCommandMapper.map(record.target!!) !is PrivilegedWriteCommandMapper.Result.Command
+        } -> "journal 目标命令不在安全白名单"
+        schemaVersion >= 2 && records.any { record ->
+            record.originalValue!!.length > MAX_STATE_VALUE_LENGTH || record.appliedValue!!.length > MAX_STATE_VALUE_LENGTH
+        } -> "journal 状态值超过限制"
+        records.any { record ->
+            listOfNotNull(record.target, record.rollback).any { command ->
+                command.arguments.size > MAX_ARGUMENTS || command.arguments.entries.sumOf { it.key.length + it.value.length } > MAX_ARGUMENT_BYTES ||
+                    command.arguments.any { (key, value) -> '\u0000' in key || '\u0000' in value }
+            }
+        } -> "journal 命令参数超过限制"
+        schemaVersion >= 2 && records.any { record ->
+            record.target!!.journalStateValues(record.rollback) != (record.originalValue to record.appliedValue)
+        } -> "journal 状态值与类型化命令不一致"
+        bootId != null && !BOOT_ID.matches(bootId) -> "journal 启动身份无效"
         else -> null
     }
 
-    private companion object { const val MAX_RECORDS = 32 }
+    private companion object {
+        const val CURRENT_SCHEMA = 2
+        const val MAX_RECORDS = 2048
+        const val MAX_STATE_VALUE_LENGTH = 4_096
+        const val MAX_ARGUMENTS = 64
+        const val MAX_ARGUMENT_BYTES = 32 * 1024
+        val BOOT_ID = Regex("[A-Fa-f0-9-]{16,64}")
+    }
 }
 
 sealed interface SceneJournalLoad {
@@ -133,7 +186,7 @@ class SharedPreferencesSceneTransactionJournalStore(context: Context) : SceneTra
     }
 
     private fun encode(journal: SceneTransactionJournal): String = JSONObject().apply {
-        put("schema", SCHEMA)
+        put("schema", journal.schemaVersion)
         put("transaction", journal.transactionId)
         put("scene", journal.sceneId)
         put("name", journal.sceneName)
@@ -141,6 +194,7 @@ class SharedPreferencesSceneTransactionJournalStore(context: Context) : SceneTra
         put("backend", journal.backend.name)
         put("created", journal.createdAtMs)
         put("revision", journal.revision)
+        journal.bootId?.let { put("bootId", it) }
         put("records", JSONArray().apply {
             journal.records.forEach { record ->
                 put(JSONObject().apply {
@@ -148,6 +202,12 @@ class SharedPreferencesSceneTransactionJournalStore(context: Context) : SceneTra
                     put("phase", record.phase.name)
                     put("rollbackCapability", record.rollback.capability)
                     put("rollbackArguments", JSONObject(record.rollback.arguments))
+                    if (journal.schemaVersion >= 2) {
+                        put("targetCapability", record.target!!.capability)
+                        put("targetArguments", JSONObject(record.target.arguments))
+                        put("originalValue", record.originalValue)
+                        put("appliedValue", record.appliedValue)
+                    }
                 })
             }
         })
@@ -155,16 +215,22 @@ class SharedPreferencesSceneTransactionJournalStore(context: Context) : SceneTra
 
     private fun decode(raw: String): SceneTransactionJournal {
         val root = JSONObject(raw)
-        require(root.optInt("schema") == SCHEMA) { "不支持的 journal schema" }
+        val schema = root.optInt("schema")
+        require(schema in 1..CURRENT_SCHEMA) { "不支持的 journal schema" }
         val recordsJson = root.getJSONArray("records")
         val records = (0 until recordsJson.length()).map { index ->
             val item = recordsJson.getJSONObject(index)
-            val argumentsJson = item.getJSONObject("rollbackArguments")
-            val arguments = argumentsJson.keys().asSequence().associateWith(argumentsJson::getString)
+            val rollbackArguments = item.getJSONObject("rollbackArguments").stringMap()
             SceneJournalRecord(
                 capability = item.getString("capability"),
-                rollback = CapabilityCommand(item.getString("rollbackCapability"), arguments),
-                phase = SceneJournalPhase.valueOf(item.getString("phase"))
+                rollback = CapabilityCommand(item.getString("rollbackCapability"), rollbackArguments),
+                phase = SceneJournalPhase.valueOf(item.getString("phase")),
+                target = if (schema >= 2) CapabilityCommand(
+                    item.getString("targetCapability"),
+                    item.getJSONObject("targetArguments").stringMap()
+                ) else null,
+                originalValue = item.optString("originalValue").takeIf { schema >= 2 },
+                appliedValue = item.optString("appliedValue").takeIf { schema >= 2 }
             )
         }
         return SceneTransactionJournal(
@@ -175,14 +241,19 @@ class SharedPreferencesSceneTransactionJournalStore(context: Context) : SceneTra
             backend = ExecutionBackend.valueOf(root.getString("backend")),
             records = records,
             createdAtMs = root.getLong("created"),
-            revision = root.getLong("revision")
+            revision = root.getLong("revision"),
+            schemaVersion = schema,
+            bootId = root.optString("bootId").takeIf(String::isNotBlank)
         ).also { require(it.validationError() == null) { it.validationError().orEmpty() } }
     }
+
+    private fun JSONObject.stringMap(): Map<String, String> =
+        keys().asSequence().associateWith(::getString)
 
     private companion object {
         const val PREFS = "qijing_scene_transaction_v1"
         const val KEY_JOURNAL = "active_journal"
-        const val SCHEMA = 1
+        const val CURRENT_SCHEMA = 2
         val PROCESS_LOCK = Any()
     }
 }
@@ -193,13 +264,19 @@ class SceneJournalSession private constructor(
 ) {
     val transactionId: String get() = journal.transactionId
 
-    fun markWriteStarted(index: Int): Boolean = update(index, SceneJournalPhase.WRITE_STARTED)
-    fun markApplied(index: Int): Boolean = update(index, SceneJournalPhase.APPLIED)
-    fun markRestored(index: Int): Boolean = update(index, SceneJournalPhase.RESTORED)
+    fun markWriteStarted(index: Int): Boolean = update(index, SceneJournalPhase.PENDING, SceneJournalPhase.WRITE_STARTED)
+    fun markApplied(index: Int): Boolean = update(index, SceneJournalPhase.WRITE_STARTED, SceneJournalPhase.APPLIED)
+    fun markRestored(index: Int): Boolean {
+        val current = journal.records.getOrNull(index)?.phase ?: return false
+        if (current == SceneJournalPhase.RESTORED) return true
+        if (current !in setOf(SceneJournalPhase.WRITE_STARTED, SceneJournalPhase.APPLIED)) return false
+        return update(index, current, SceneJournalPhase.RESTORED)
+    }
     fun clear(): Boolean = store.clear(journal.transactionId, journal.revision)
 
-    private fun update(index: Int, phase: SceneJournalPhase): Boolean {
+    private fun update(index: Int, expectedPhase: SceneJournalPhase, phase: SceneJournalPhase): Boolean {
         if (index !in journal.records.indices) return false
+        if (journal.records[index].phase != expectedPhase) return false
         val expectedRevision = journal.revision
         val updated = journal.copy(
             records = journal.records.mapIndexed { recordIndex, record ->
@@ -222,9 +299,26 @@ class SceneJournalSession private constructor(
             if (store.load() !is SceneJournalLoad.None) return null
             val records = plan.commands.map { command ->
                 val rollback = command.rollback ?: return null
-                SceneJournalRecord(command.capability, rollback)
+                val values = command.journalStateValues(rollback) ?: return null
+                SceneJournalRecord(
+                    capability = command.capability,
+                    rollback = rollback.copy(rollback = null),
+                    target = command.copy(rollback = null),
+                    originalValue = values.first,
+                    appliedValue = values.second
+                )
             }
-            val journal = SceneTransactionJournal(plan.id, scene.id, scene.name, scene.packageNames.firstOrNull(), backend, records, System.currentTimeMillis())
+            val journal = SceneTransactionJournal(
+                plan.id,
+                scene.id,
+                scene.name,
+                scene.packageNames.firstOrNull(),
+                backend,
+                records,
+                System.currentTimeMillis(),
+                schemaVersion = 2,
+                bootId = LinuxBootIdentity.current()
+            )
             if (!store.save(journal)) return null
             return SceneJournalSession(store, journal)
         }
@@ -250,7 +344,9 @@ data class SceneJournalRecoveryResult(
 
 class SceneJournalRecovery(
     private val store: SceneTransactionJournalStore,
-    private val broker: ExecutionBroker
+    private val broker: ExecutionBroker,
+    private val currentValueReader: CommandValueReader? = null,
+    private val bootIdentity: () -> String? = LinuxBootIdentity::current
 ) {
     suspend fun recoverPending(): SceneJournalRecoveryResult {
         val journal = when (val loaded = store.load()) {
@@ -279,6 +375,58 @@ class SceneJournalRecovery(
         var restored = 0
         journal.records.withIndex().toList().asReversed().forEach { (index, record) ->
             if (record.phase !in setOf(SceneJournalPhase.WRITE_STARTED, SceneJournalPhase.APPLIED)) return@forEach
+            if (journal.schemaVersion < 2 || record.target == null || record.originalValue == null || record.appliedValue == null) {
+                return SceneJournalRecoveryResult(
+                    journal.transactionId,
+                    restored,
+                    ExecutionResult.Failed("JOURNAL_WRITE_STATE_UNVERIFIED", "旧版 journal 缺少写入三态数据，已锁定自动恢复")
+                )
+            }
+            if (record.phase == SceneJournalPhase.WRITE_STARTED) {
+                val currentBoot = bootIdentity()
+                if (journal.bootId == null || currentBoot == null || journal.bootId == currentBoot) {
+                    return SceneJournalRecoveryResult(
+                        journal.transactionId,
+                        restored,
+                        ExecutionResult.Failed(
+                            "JOURNAL_WRITE_PROCESS_UNVERIFIED",
+                            "写入在同一次开机中中断，无法证明旧 Root 进程已停止；重启设备后才能安全恢复"
+                        )
+                    )
+                }
+            }
+            val reader = currentValueReader ?: return SceneJournalRecoveryResult(
+                journal.transactionId,
+                restored,
+                ExecutionResult.Failed("JOURNAL_CURRENT_READ_UNAVAILABLE", "缺少当前值读取通道，已锁定自动恢复")
+            )
+            val current = reader.read(record.target) ?: return SceneJournalRecoveryResult(
+                journal.transactionId,
+                restored,
+                ExecutionResult.Failed("JOURNAL_CURRENT_READ_FAILED", "无法读取 ${record.capability} 当前值，已锁定自动恢复")
+            )
+            when (current) {
+                record.originalValue -> {
+                    if (!session.markRestored(index)) {
+                        return SceneJournalRecoveryResult(
+                            journal.transactionId,
+                            restored,
+                            ExecutionResult.Failed("JOURNAL_PROGRESS_FAILED", "当前已是原值但无法保存恢复进度")
+                        )
+                    }
+                    restored += 1
+                    return@forEach
+                }
+                record.appliedValue -> Unit
+                else -> return SceneJournalRecoveryResult(
+                    journal.transactionId,
+                    restored,
+                    ExecutionResult.Failed(
+                        "JOURNAL_CURRENT_VALUE_CONFLICT",
+                        "${record.capability} 当前值既不是原值也不是栖境目标值，已阻止覆盖"
+                    )
+                )
+            }
             val result = broker.execute(record.rollback)
             if (result !is ExecutionResult.Applied) return SceneJournalRecoveryResult(journal.transactionId, restored, result)
             if (result.backend != journal.backend) {
@@ -299,4 +447,50 @@ class SceneJournalRecovery(
         if (!session.clear()) return SceneJournalRecoveryResult(journal.transactionId, restored, ExecutionResult.Failed("JOURNAL_CLEAR_FAILED", "恢复完成但无法清除 journal"))
         return SceneJournalRecoveryResult(journal.transactionId, restored)
     }
+}
+
+private fun CapabilityCommand.journalStateValues(rollback: CapabilityCommand): Pair<String, String>? {
+    val original = when (capability) {
+        "scheduler.profile.limiter.cluster.set" -> {
+            val cluster = ProfileLimiterCommandPolicy.parse(this, restore = false) ?: return null
+            val state = listOf(
+                rollback.arguments["min_khz"], rollback.arguments["max_khz"], rollback.arguments["core_ctl"]
+            ).takeIf { values -> values.none { it.isNullOrEmpty() } }?.joinToString("|") { it!! }
+            state?.let { if (ManagedLimiterRuntime.isManaged(cluster)) "inactive|$it" else it }
+        }
+        "scheduler.profile.limiter.clear" -> "inactive"
+        "scheduler.profile.gesture_boost.configure" -> "inactive"
+        "scheduler.profile.app_frequencies.set" -> listOf(
+            rollback.arguments["efficiency_policy"],
+            rollback.arguments["efficiency_khz"],
+            rollback.arguments["performance_policy"],
+            rollback.arguments["performance_khz"]
+        ).takeIf { values -> values.none { it.isNullOrEmpty() } }?.joinToString("|") { it!! }
+        else -> rollback.arguments["value"]
+    } ?: return null
+    val applied = when (capability) {
+        "scheduler.profile.limiter.cluster.set" -> {
+            val cluster = ProfileLimiterCommandPolicy.parse(this, restore = false) ?: return null
+            if (ManagedLimiterRuntime.isManaged(cluster)) "owned|${ManagedLimiterRuntime.contractId(cluster, restore = false)}"
+            else listOf(arguments["min_khz"], arguments["max_khz"], arguments["core_ctl"])
+                .takeIf { values -> values.none { it.isNullOrEmpty() } }?.joinToString("|") { it!! }
+        }
+        "scheduler.profile.limiter.clear" -> "inactive"
+        "scheduler.profile.gesture_boost.configure" -> arguments["contract_id"]?.let { "owned|$it" }
+        "scheduler.profile.app_frequencies.set" -> listOf(
+            rollback.arguments["efficiency_policy"],
+            arguments["efficiency_khz"],
+            rollback.arguments["performance_policy"],
+            arguments["performance_khz"]
+        ).takeIf { values -> values.none { it.isNullOrEmpty() } }?.joinToString("|") { it!! }
+        "scheduler.thread.cpuset.set" -> arguments["value"]?.substringBefore('@')
+        "display.refresh_rate.set" -> arguments["value"]?.toDoubleOrNull()?.let { hz ->
+            if (hz == 0.0) "absent|absent" else {
+                val normalized = if (hz % 1.0 == 0.0) hz.toInt().toString() else hz.toString()
+                "$normalized|$normalized"
+            }
+        }
+        else -> arguments["value"] ?: arguments["khz"]
+    } ?: return null
+    return original to applied
 }

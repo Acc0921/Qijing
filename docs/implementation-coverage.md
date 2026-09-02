@@ -5,7 +5,7 @@
 | 能力 | 代码入口 | 当前状态 |
 | --- | --- | --- |
 | 特权执行与 dry-run | `core.execution.ExecutionBroker` / `BackendRuntimeFactory` | 默认 dry-run；用户可显式选择 Root 或 Shizuku，不可用时明确拒绝且不静默切换；切换后端会停用已启用场景，且自动化未安全停止时拒绝切换 |
-| Root 后端 | `core.execution.RootExecutionBroker` / `ProcessSuTransport` | 固定支持逐 CPU policy 的 governor/频率、swappiness 与 Uperf/UperfGT/fas-rs 模式；参数、身份、路径和模式均为白名单，超时、写后读回、稳定错误码和特权快照读取已实现；Root 只读握手已通过，尚未执行真机真实性能写入 |
+| Root 后端 | `core.execution.RootExecutionBroker` / `ProcessSuTransport` | 支持逐 CPU policy、swappiness、固定第三方模式、配置节点、刷新率、线程级调度，以及托管 limiter/Gesture worker；参数、路径、PID/TID、进程启动时间与 owner contract 均经过类型校验，每项写后读回并带恢复命令；Root 只读握手已通过，匹配设备真实写入仍待授权验收 |
 | Shizuku 后端 | `core.execution.ShizukuExecutionBroker` / `ShizukuUserServiceTransport` | SDK、显式授权、Binder UserService、固定白名单、断连错误和特权快照读取已实现；Android 7+ 可用，尚未执行真机真实写入 |
 | Debug 调节模拟 | `debug.tuning.DebugTuningExecutionBroker` / `DebugRecoveryRunner` | 仅编入 debug；覆盖四项白名单能力、故障注入、journal 与重启恢复，release DEX/Manifest 隔离检查通过；不代表真实硬件可用 |
 | 只读 ADB | `core.execution.ReadOnlyAdbExecutionBroker` / `ProcessAdbTransport` | 固定命令映射和白名单；可注入 adb 进程传输，仍仅允许读取设备状态；Android 端不装配为写入后端 |
@@ -19,10 +19,12 @@
 | 场景选择与生命周期 | `core.scene.SceneSelector` / `SceneActivationCoordinator` | 仅选择已启用场景并按包名/优先级决策；最高优先级并列时拒绝执行；同场景去重、切换前恢复、离场/停止/事件源失效恢复已实现 |
 | 前台事件源 | `core.scene.UsageStatsForegroundAppSource` | 通过 Usage Stats 只读获取前台包名；未授权时安全降级并阻止无效轮询 |
 | 场景轮询 | `core.scene.ScenePollingLoop` | 支持启动、停止和可配置间隔；每次有效采样都会协调一次，使同一前台应用下的停用/重新启用也能触发恢复或应用，协调器负责去重避免重复写入 |
-| 后台承载 | `core.scene.SceneTriggerService` / `SceneServiceStateStore` | 用户启动的自动化使用带明确用途的 `specialUse` FGS；具备 START_STICKY 安全重启、Android 15 超时入口、15 秒心跳和陈旧状态校准；异常退出锁定真实写入并依赖 journal 恢复，不在主线程阻塞等待 |
-| 场景快照与恢复 | `core.scene.SceneSnapshotManager` / `BrokerSceneRestoreExecutor` | Root/Shizuku 使用特权只读模板建立 CPU governor/频率及 swappiness 快照；正常恢复与重启恢复逐项持久化进度，重复恢复保持幂等；真机真实写后恢复仍待授权验收 |
-| 全局模式与第三方调度 | `feature.tuning.profile` / `core.scheduler` / `ui.TuningScreen` | 省电、均衡、性能、极速会按设备实际声明的 CPU policy 与 Governor 解析；可选择系统、Uperf、UperfGT 或 fas-rs 控制方，第三方只接受固定身份、固定路径、固定四档模式和读回验证。新增配置模块兼容识别，但原包缺少栖境桥接、可信状态和验证入口时保持不可选择，不能冒充已支持；完整边界见 `configuration-scheduler-compatibility.md` |
-| 线程调度规则 | `core.scheduler.ThreadPlacementRules` | 已实现有界 JSON 子集、CPU 集合与设备核心交集校验、包名唯一性、线程名精确/单后缀通配匹配、默认归属及 RR/nice 意图决策；当前只生成确定性决策，不执行 affinity、cpuset、chrt 或 renice，Root 常驻执行器仍未开放 |
+| 后台承载 | `core.scene.SceneTriggerService` / `SceneServiceStateStore` | 用户启动的自动化使用带明确用途的 `specialUse` FGS；具备 START_STICKY 安全重启、Android 15 超时入口、15 秒心跳、陈旧状态校准和托管 worker 定时健康检查；fault/stale/失联时先恢复活动事务再停止，恢复失败则锁定，不自动反复重启 worker |
+| 场景快照与恢复 | `core.scene.SceneSnapshotManager` / `BrokerSceneRestoreExecutor` / `SceneTransactionJournal` | 快照覆盖 CPU、配置节点、线程属性和托管运行时稳定状态；Schema 2 journal 校验状态与类型化命令一致性并记录 Linux boot ID，同次开机的疑似迟到写入保持锁定。恢复仅接受原值或栖境最后目标值，第三方值冲突不覆盖 |
+| 全局模式与第三方调度 | `feature.tuning.profile` / `core.scheduler` / `ui.TuningScreen` | 省电、均衡、性能、极速可由系统、Uperf、UperfGT、fas-rs 或栖境配置引擎执行。配置引擎从系统文件选择器导入 ZIP，逐变体编译并要求 SoC/核心/拓扑完全匹配；匹配后可进入全局模式和应用场景预演 |
+| 配置 profile 编译与绑定 | `core.scheduler.pack` / `core.scheduler.profile` | ZIP 采用 Zip Slip、大小、条目、UTF-8 与重复路径防护，只保留声明式配置；支持已发现的全部 profile 宏及 `_Apps/_Games/_Camera`，绑定为固定节点、CPU policy、cpuset、显示刷新率等类型化命令，不生成 Shell |
+| 线程调度规则 | `core.scheduler.ThreadPlacementRules` / `core.scheduler.thread` | 支持 package、comm/other、heavy/unity、rr、ni；Root 快照包含 PID/TID 与两级启动时间，执行 cpuset、affinity、chrt 与 renice 后逐项读回。服务持续观察新增线程，先恢复当前事务再重新编排，离场、锁屏状态切换和异常重启均沿 journal 恢复 |
+| 动态 limiter 与手势调度 | `core.execution.ManagedLimiterRuntime` / `ManagedGestureRuntime` / `ManagedRuntimeHealthPolicy` | limiter 以公开的栖境负载语义处理 margins/excludes/prefer，Gesture 只支持已验证的 BTN_TOUCH enter-only/UP 恢复；二者均为 Root-only，具有 owner、PID/start ticks、内部状态、写后读回、CAS 恢复和服务健康检查。`ddr_boost=true`、非空 Gesture exit 与 Shizuku 常驻调度明确阻断 |
 | CPU 手动调节与观察 | `ui.TuningScreen` / `core.device.observation.CpuObservationReader` | 展示逐 policy Governor/当前与硬件频率范围、关联核心，并展示每核频率、在线状态与负载；点击 policy 可从设备实际候选中自定义 Governor 与频率范围，再经过预览、快照、高风险确认、写后读回和失败恢复；真机真实写尚未执行 |
 | GPU 只读观察 | `core.device.observation.GpuObservationReader` / `ui.TuningScreen` | 识别 KGSL、Mali 和通用 devfreq 固定节点，展示当前/范围频率、负载与 Governor；无可识别节点或无权限时明确降级，不开放 GPU 写入 |
 | 内存、ZRAM 与功耗 | `core.device.observation.MemoryObservationReader` / `BatteryObservationReader` / `ui.TuningScreen` | 展示 RAM、Swap、全部 ZRAM 设备、压缩数据/内存占用/算法，以及电池电流、电压、温度和电池侧瞬时或估算功率；swappiness 具备范围校验、预览、快照、确认、读回和恢复链路。ZRAM 重建继续关闭，功率不冒充 CPU/GPU 分项数据 |
@@ -37,8 +39,8 @@
 - 同一应用的同优先级场景会在预演阶段阻断，不依赖内部 id 排序向用户伪装确定性。
 - 服务状态不再使用 Compose 临时布尔值；运行、停止恢复和恢复未确认状态在重建页面后保持一致，只有 `STOPPED` 能切换后端。
 - Root/Shizuku 已能通过特权 transport 读取快照，但尚未对真实 CPU 或 swappiness 执行写入、读回和恢复，因此不能标记为真机调节可用。
-- M4/M5 已补齐全局四档模式、逐 policy 自定义、第三方固定调度契约、每核 CPU/GPU/内存/ZRAM/电池侧功耗观察与手动安全调节；ZRAM、GPU 与核心上下线写入仍明确关闭。
-- API 23/API 35 模拟器最近一次均完成 15 项设备测试且 0 失败，Root-only 用例按设备条件跳过；本次配置调度兼容改动后 JVM 119 项通过，Debug/Release APK 与 Lint 通过。模拟器条件跳过不能作为 Root 写入证据。
+- M4/M5 已补齐全局四档模式、逐 policy 自定义、第三方固定调度契约、本地配置引擎、每核 CPU/GPU/内存/ZRAM/电池侧功耗观察与手动事务调节；GPU 与核心在线写入仅在匹配配置明确声明时进入类型化事务，ZRAM 重建仍关闭。
+- 用户真实 ZIP 的全部 Variant、Profile route、应用规则、四档模式和 active/inactive 已完成离线规划与命令映射回归；模拟器与 JVM 测试不作为 Root 真机写入证据。
 
 ## 下一阶段完成定义
 
@@ -48,6 +50,6 @@
 2. 通过进程中断与部分恢复故障注入，人工核对总览/场景轨迹、通知和后端锁定是否一致。
 3. 完成长时 FPS 会话、TalkBack、200% 字体、深浅色与小屏人工走查。
 4. 若选择 Google Play 分发，提交 `specialUse` 前台服务与 `QUERY_ALL_PACKAGES` 的政策申报；GitHub 侧载不替代商店审核。
-5. 按 `configuration-scheduler-compatibility.md` 实现类型化配置编译器与 Root 线程调度执行器；配置模块只有身份而无可信状态时继续 fail-closed。
+5. 在匹配的 8E/8E5 设备完成配置包四档模式、应用/游戏、active/inactive、新线程纳入、进程中断与恢复不完整故障验收；MIX 2S 只做导入拒绝和只读验证。
 
 完成口径继续遵循 [后端与恢复验收标准](backend-acceptance.md) 与 [场景链路工作台规格](scene-chain-workbench.md)，不以 debug 模拟或模拟器通过替代真实硬件写入结论。

@@ -81,16 +81,43 @@ class SceneTransactionJournalTest {
             packageName = "com.demo",
             backend = ExecutionBackend.ROOT,
             records = listOf(
-                SceneJournalRecord("cpu.governor.set", CapabilityCommand("cpu.governor.set.restore", mapOf("value" to "schedutil")), SceneJournalPhase.APPLIED),
-                SceneJournalRecord("memory.swappiness.set", CapabilityCommand("memory.swappiness.set.restore", mapOf("value" to "60")), SceneJournalPhase.WRITE_STARTED),
-                SceneJournalRecord("cpu.min_frequency.set", CapabilityCommand("cpu.min_frequency.set.restore", mapOf("value" to "300000")), SceneJournalPhase.PENDING)
+                SceneJournalRecord(
+                    "cpu.governor.set",
+                    CapabilityCommand("cpu.governor.set.restore", mapOf("value" to "schedutil", "expected" to "performance")),
+                    SceneJournalPhase.APPLIED,
+                    target = CapabilityCommand("cpu.governor.set", mapOf("value" to "performance")),
+                    originalValue = "schedutil",
+                    appliedValue = "performance"
+                ),
+                SceneJournalRecord(
+                    "memory.swappiness.set",
+                    CapabilityCommand("memory.swappiness.set.restore", mapOf("value" to "60", "expected" to "80")),
+                    SceneJournalPhase.WRITE_STARTED,
+                    target = CapabilityCommand("memory.swappiness.set", mapOf("value" to "80")),
+                    originalValue = "60",
+                    appliedValue = "80"
+                ),
+                SceneJournalRecord(
+                    "cpu.min_frequency.set",
+                    CapabilityCommand("cpu.min_frequency.set.restore", mapOf("value" to "300000", "expected" to "500000")),
+                    SceneJournalPhase.PENDING,
+                    target = CapabilityCommand("cpu.min_frequency.set", mapOf("khz" to "500000")),
+                    originalValue = "300000",
+                    appliedValue = "500000"
+                )
             ),
-            createdAtMs = 1L
+            createdAtMs = 1L,
+            schemaVersion = 2,
+            bootId = DIFFERENT_BOOT_ID
         )
         assertTrue(store.save(journal))
         val broker = RecordingRealBroker()
 
-        val result = SceneJournalRecovery(store, broker).recoverPending()
+        val result = SceneJournalRecovery(
+            store,
+            broker,
+            CommandValueReader { command -> if (command.capability == "cpu.governor.set") "performance" else "80" }
+        ) { CURRENT_BOOT_ID }.recoverPending()
 
         assertTrue(result.succeeded)
         assertEquals(2, result.restoredCommands)
@@ -98,17 +125,125 @@ class SceneTransactionJournalTest {
         assertEquals(SceneJournalLoad.None, store.load())
     }
 
+    @Test fun `write started with unchanged original value closes without issuing rollback`() = runBlocking {
+        val store = schemaTwoWriteStartedStore()
+        val broker = RecordingRealBroker()
+
+        val result = SceneJournalRecovery(store, broker, CommandValueReader { "60" }) { CURRENT_BOOT_ID }.recoverPending()
+
+        assertTrue(result.succeeded)
+        assertEquals(1, result.restoredCommands)
+        assertTrue(broker.calls.isEmpty())
+        assertEquals(SceneJournalLoad.None, store.load())
+    }
+
+    @Test fun `write started at applied value performs verified rollback`() = runBlocking {
+        val store = schemaTwoWriteStartedStore()
+        val broker = RecordingRealBroker()
+
+        val result = SceneJournalRecovery(store, broker, CommandValueReader { "80" }) { CURRENT_BOOT_ID }.recoverPending()
+
+        assertTrue(result.succeeded)
+        assertEquals(listOf("memory.swappiness.set.restore"), broker.calls)
+        assertEquals(SceneJournalLoad.None, store.load())
+    }
+
+    @Test fun `write started at a third value is locked without overwrite`() = runBlocking {
+        val store = schemaTwoWriteStartedStore()
+        val broker = RecordingRealBroker()
+
+        val result = SceneJournalRecovery(store, broker, CommandValueReader { "100" }) { CURRENT_BOOT_ID }.recoverPending()
+
+        assertEquals("JOURNAL_CURRENT_VALUE_CONFLICT", (result.failure as ExecutionResult.Failed).code)
+        assertTrue(broker.calls.isEmpty())
+        assertTrue(store.load() is SceneJournalLoad.Loaded)
+    }
+
+    @Test fun `same boot write started never races an unconfirmed Root process`() = runBlocking {
+        val store = schemaTwoWriteStartedStore()
+        val journal = (store.load() as SceneJournalLoad.Loaded).journal
+        store.current = SceneJournalLoad.Loaded(journal.copy(bootId = CURRENT_BOOT_ID))
+        val broker = RecordingRealBroker()
+        var reads = 0
+
+        val result = SceneJournalRecovery(store, broker, CommandValueReader { reads += 1; "80" }) {
+            CURRENT_BOOT_ID
+        }.recoverPending()
+
+        assertEquals("JOURNAL_WRITE_PROCESS_UNVERIFIED", (result.failure as ExecutionResult.Failed).code)
+        assertEquals(0, reads)
+        assertTrue(broker.calls.isEmpty())
+    }
+
+    @Test fun `applied record at a third value is locked without overwrite`() = runBlocking {
+        val store = journalStoreWithOneAppliedRecord()
+        val broker = RecordingRealBroker()
+
+        val result = SceneJournalRecovery(store, broker, CommandValueReader { "powersave" }).recoverPending()
+
+        assertEquals("JOURNAL_CURRENT_VALUE_CONFLICT", (result.failure as ExecutionResult.Failed).code)
+        assertTrue(broker.calls.isEmpty())
+    }
+
+    @Test fun `schema two rejects state values that do not match typed commands`() {
+        val store = journalStoreWithOneAppliedRecord()
+        val journal = (store.load() as SceneJournalLoad.Loaded).journal
+        val tampered = journal.copy(
+            transactionId = "tampered",
+            records = journal.records.map { it.copy(appliedValue = "powersave") },
+            revision = 0
+        )
+        val empty = InMemorySceneTransactionJournalStore()
+
+        assertFalse(empty.save(tampered))
+    }
+
+    @Test fun `legacy write started record is conservatively locked`() = runBlocking {
+        val store = InMemorySceneTransactionJournalStore()
+        assertTrue(
+            store.save(
+                SceneTransactionJournal(
+                    "legacy", "scene", "Scene", "com.demo", ExecutionBackend.ROOT,
+                    listOf(
+                        SceneJournalRecord(
+                            "memory.swappiness.set",
+                            CapabilityCommand("memory.swappiness.set.restore", mapOf("value" to "60")),
+                            SceneJournalPhase.WRITE_STARTED
+                        )
+                    ),
+                    1L,
+                    schemaVersion = 1
+                )
+            )
+        )
+        val broker = RecordingRealBroker()
+
+        val result = SceneJournalRecovery(store, broker, CommandValueReader { "80" }).recoverPending()
+
+        assertEquals("JOURNAL_WRITE_STATE_UNVERIFIED", (result.failure as ExecutionResult.Failed).code)
+        assertTrue(broker.calls.isEmpty())
+        assertTrue(store.load() is SceneJournalLoad.Loaded)
+    }
+
     @Test fun `failed restart recovery keeps journal for another attempt`() = runBlocking {
         val store = InMemorySceneTransactionJournalStore()
         val journal = SceneTransactionJournal(
             "tx", "scene", "Scene", "com.demo", ExecutionBackend.ROOT,
-            listOf(SceneJournalRecord("cpu.governor.set", CapabilityCommand("cpu.governor.set.restore", mapOf("value" to "schedutil")), SceneJournalPhase.APPLIED)),
-            1L
+            listOf(SceneJournalRecord(
+                "cpu.governor.set",
+                CapabilityCommand("cpu.governor.set.restore", mapOf("value" to "schedutil", "expected" to "performance")),
+                SceneJournalPhase.APPLIED,
+                target = CapabilityCommand("cpu.governor.set", mapOf("value" to "performance")),
+                originalValue = "schedutil",
+                appliedValue = "performance"
+            )),
+            1L,
+            schemaVersion = 2
         )
         assertTrue(store.save(journal))
         val broker = RecordingRealBroker(failCapability = "cpu.governor.set.restore")
 
-        val result = SceneJournalRecovery(store, broker).recoverPending()
+        val result = SceneJournalRecovery(store, broker, CommandValueReader { "performance" }).recoverPending()
 
         assertFalse(result.succeeded)
         assertTrue(store.load() is SceneJournalLoad.Loaded)
@@ -124,7 +259,7 @@ class SceneTransactionJournalTest {
             }
         }
 
-        val result = SceneJournalRecovery(store, broker).recoverPending()
+        val result = SceneJournalRecovery(store, broker, CommandValueReader { "performance" }).recoverPending()
 
         assertEquals("JOURNAL_BACKEND_UNVERIFIED", (result.failure as ExecutionResult.Failed).code)
         assertTrue(calls.isEmpty())
@@ -146,7 +281,7 @@ class SceneTransactionJournalTest {
         val store = journalStoreWithOneAppliedRecord()
         val broker = RecordingRealBroker(resultBackend = ExecutionBackend.SHIZUKU)
 
-        val result = SceneJournalRecovery(store, broker).recoverPending()
+        val result = SceneJournalRecovery(store, broker, CommandValueReader { "performance" }).recoverPending()
 
         assertEquals("JOURNAL_RESULT_BACKEND_MISMATCH", (result.failure as ExecutionResult.Failed).code)
         val journal = (store.load() as SceneJournalLoad.Loaded).journal
@@ -267,11 +402,43 @@ class SceneTransactionJournalTest {
                         listOf(
                             SceneJournalRecord(
                                 "cpu.governor.set",
-                                CapabilityCommand("cpu.governor.set.restore", mapOf("value" to "schedutil")),
-                                SceneJournalPhase.APPLIED
+                                CapabilityCommand("cpu.governor.set.restore", mapOf("value" to "schedutil", "expected" to "performance")),
+                                SceneJournalPhase.APPLIED,
+                                target = CapabilityCommand("cpu.governor.set", mapOf("value" to "performance")),
+                                originalValue = "schedutil",
+                                appliedValue = "performance"
                             )
                         ),
-                        1L
+                        1L,
+                        schemaVersion = 2
+                    )
+                )
+            )
+        }
+
+    private fun schemaTwoWriteStartedStore(): InMemorySceneTransactionJournalStore =
+        InMemorySceneTransactionJournalStore().also { store ->
+            assertTrue(
+                store.save(
+                    SceneTransactionJournal(
+                        "tx-v2",
+                        "scene",
+                        "Scene",
+                        "com.demo",
+                        ExecutionBackend.ROOT,
+                        listOf(
+                            SceneJournalRecord(
+                                capability = "memory.swappiness.set",
+                                rollback = CapabilityCommand("memory.swappiness.set.restore", mapOf("value" to "60", "expected" to "80")),
+                                phase = SceneJournalPhase.WRITE_STARTED,
+                                target = CapabilityCommand("memory.swappiness.set", mapOf("value" to "80")),
+                                originalValue = "60",
+                                appliedValue = "80"
+                            )
+                        ),
+                        1L,
+                        schemaVersion = 2,
+                        bootId = DIFFERENT_BOOT_ID
                     )
                 )
             )
@@ -291,5 +458,10 @@ class SceneTransactionJournalTest {
             return if (command.capability in failCapabilities) ExecutionResult.Failed("INJECTED", "failure")
             else ExecutionResult.Applied(resultBackend)
         }
+    }
+
+    private companion object {
+        const val DIFFERENT_BOOT_ID = "00000000-0000-0000-0000-000000000000"
+        const val CURRENT_BOOT_ID = "11111111-1111-1111-1111-111111111111"
     }
 }

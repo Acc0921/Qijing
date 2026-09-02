@@ -1,6 +1,8 @@
 package com.qijing.ui
 
 import android.content.Context
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -70,13 +72,27 @@ import com.qijing.core.scheduler.SchedulerAvailability
 import com.qijing.core.scheduler.SchedulerMode
 import com.qijing.core.scheduler.SchedulerProbeResult
 import com.qijing.core.scheduler.SchedulerProviderId
+import com.qijing.core.scheduler.pack.AndroidSchedulerDeviceProbe
+import com.qijing.core.scheduler.pack.SchedulerPackImportResult
+import com.qijing.core.scheduler.pack.SchedulerPackImporter
+import com.qijing.core.scheduler.pack.SchedulerPackLoad
+import com.qijing.core.scheduler.pack.SchedulerPackStore
+import com.qijing.core.scheduler.profile.InstalledProfileSceneExpander
+import com.qijing.core.scheduler.profile.ProfileCompileResult
+import com.qijing.core.scheduler.profile.ProfileCompiler
 import com.qijing.core.scheduler.UperfGtSchedulerAdapter
 import com.qijing.core.scheduler.UperfSchedulerAdapter
 import com.qijing.core.scene.CapabilityValueReader
+import com.qijing.core.scene.CommandValueReader
 import com.qijing.core.scene.SceneEngine
+import com.qijing.core.scene.SceneCommandExpander
+import com.qijing.core.scene.SceneCommandExpansion
 import com.qijing.core.scene.SceneSnapshotManager
+import com.qijing.core.scene.SceneServicePhase
+import com.qijing.core.scene.SceneServiceStateStore
 import com.qijing.core.scene.SharedPreferencesSceneTransactionJournalStore
 import com.qijing.feature.tuning.profile.GlobalTuningConfiguration
+import com.qijing.feature.tuning.profile.GlobalAutomationApprovalStore
 import com.qijing.feature.tuning.profile.GlobalTuningLoad
 import com.qijing.feature.tuning.profile.GlobalTuningResolution
 import com.qijing.feature.tuning.profile.GlobalTuningResolver
@@ -120,6 +136,8 @@ internal fun TuningScreen(dataStore: NewDataStore) {
     val gpuReader = remember { GpuObservationReader() }
     val batteryReader = remember(context) { BatteryObservationReader(AndroidBatteryPlatformSource(context)) }
     val profileStore = remember(context) { SharedPreferencesGlobalTuningProfileStore(context) }
+    val globalApprovalStore = remember(context) { GlobalAutomationApprovalStore(context) }
+    val packStore = remember(context) { SchedulerPackStore(context) }
     val recoveryStore = remember(context) { SharedPreferencesGlobalTuningRecoveryStore(context) }
     var savedGlobal by remember(profileStore) { mutableStateOf(loadGlobal(profileStore)) }
     var draftGlobal by remember(savedGlobal) { mutableStateOf(savedGlobal) }
@@ -134,6 +152,8 @@ internal fun TuningScreen(dataStore: NewDataStore) {
     var probes by remember { mutableStateOf<List<SchedulerProbeResult>>(emptyList()) }
     var showModeSheet by remember { mutableStateOf(false) }
     var showProviderSheet by remember { mutableStateOf(false) }
+    var showPackSheet by remember { mutableStateOf(false) }
+    var packLoad by remember(packStore) { mutableStateOf(packStore.load()) }
     var editingPolicy by remember { mutableStateOf<CpuPolicyObservation?>(null) }
     var policyGovernor by remember { mutableStateOf("") }
     var policyRangeMHz by remember { mutableStateOf(0f..0f) }
@@ -142,6 +162,49 @@ internal fun TuningScreen(dataStore: NewDataStore) {
     var resultMessage by remember { mutableStateOf<String?>(null) }
     var resultError by remember { mutableStateOf(false) }
     var refreshToken by remember { mutableStateOf(0) }
+    val packPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            applying = true
+            val outcome = withContext(Dispatchers.IO) {
+                val imported = runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { SchedulerPackImporter().import(it) }
+                        ?: SchedulerPackImportResult.Rejected(
+                            com.qijing.core.scheduler.pack.SchedulerPackRejectReason.INVALID_ZIP,
+                            "无法读取所选文件"
+                        )
+                }.getOrElse {
+                    SchedulerPackImportResult.Rejected(
+                        com.qijing.core.scheduler.pack.SchedulerPackRejectReason.INVALID_ZIP,
+                        it.message ?: "配置包读取失败"
+                    )
+                }
+                when (imported) {
+                    is SchedulerPackImportResult.Rejected -> imported.detail to false
+                    is SchedulerPackImportResult.Imported -> {
+                        val compileFailure = imported.pack.variants.firstNotNullOfOrNull { variant ->
+                            when (val compiled = ProfileCompiler().compile(variant.profileJson, variant.imports)) {
+                                is ProfileCompileResult.Compiled -> null
+                                is ProfileCompileResult.Rejected -> "${variant.relativePath}：${compiled.reason}"
+                            }
+                        }
+                        when {
+                            compileFailure != null -> "配置 profile 未通过编译：$compileFailure" to false
+                            !packStore.install(imported.pack) -> "配置包无法保存到应用私有目录" to false
+                            else -> {
+                                disableProfileScenes(dataStore)
+                                "已导入 ${imported.pack.module.name}；原配置场景已停用，请选择变体后重新预演" to true
+                            }
+                        }
+                    }
+                }
+            }
+            packLoad = packStore.load()
+            resultMessage = outcome.first
+            resultError = !outcome.second
+            showPackSheet = outcome.second
+            applying = false
+        }
+    }
 
     LaunchedEffect(refreshToken, backend) {
         var cycle = 0
@@ -165,7 +228,10 @@ internal fun TuningScreen(dataStore: NewDataStore) {
         }
     }
 
-    LazyColumn(contentPadding = PaddingValues(bottom = 28.dp)) {
+    LazyColumn(
+        modifier = Modifier.testTag("tuning-list"),
+        contentPadding = PaddingValues(bottom = 28.dp)
+    ) {
         item {
             QijingTopAppBar(
                 title = "调节",
@@ -181,8 +247,12 @@ internal fun TuningScreen(dataStore: NewDataStore) {
                 PageSectionHeader("全局调节", "场景可跟随这套默认意图", Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                 NativeListRow(
                     title = "全局模式",
-                    supporting = if (draftGlobal == savedGlobal) "当前保存的设备默认意图" else "尚未预演和保存",
-                    status = draftGlobal.selected.displayName(),
+                    supporting = when {
+                        draftGlobal != savedGlobal -> "尚未预演和保存"
+                        !savedGlobal.selectionKnown -> "设备已恢复旧值，但旧恢复计划未记录对应模式；请重新选择并预演"
+                        else -> "当前保存的设备默认意图"
+                    },
+                    status = if (draftGlobal == savedGlobal && !savedGlobal.selectionKnown) "未知" else draftGlobal.selected.displayName(),
                     modifier = Modifier.testTag("global-mode-row"),
                     onClick = { showModeSheet = true }
                 )
@@ -191,7 +261,7 @@ internal fun TuningScreen(dataStore: NewDataStore) {
                 NativeListRow(
                     title = "调度控制方",
                     supporting = selectedProbe?.detail ?: if (draftGlobal.provider == SchedulerProviderId.SYSTEM) "栖境结构化白名单" else "正在探测固定契约",
-                    status = draftGlobal.provider.displayName(),
+                    status = if (draftGlobal == savedGlobal && !savedGlobal.selectionKnown) "未知" else draftGlobal.provider.displayName(),
                     modifier = Modifier.testTag("scheduler-provider-row"),
                     onClick = { showProviderSheet = true }
                 )
@@ -232,7 +302,9 @@ internal fun TuningScreen(dataStore: NewDataStore) {
                 recoveryPlan?.let { recovery ->
                     NativeListRow(
                         title = "恢复上次调节",
-                        supporting = "${recovery.backend.displayName()} · ${recovery.commands.size} 项原值",
+                        supporting = recovery.previousConfiguration?.let {
+                            "${recovery.backend.displayName()} · 恢复为 ${it.selected.displayName()} / ${it.provider.displayName()}"
+                        } ?: "${recovery.backend.displayName()} · 旧计划未记录对应全局模式，恢复后将标记为未知",
                         status = "预演 ›",
                         onClick = {
                             if (backend != ExecutionBackend.DRY_RUN && backend != recovery.backend) {
@@ -241,12 +313,56 @@ internal fun TuningScreen(dataStore: NewDataStore) {
                             } else {
                                 pending = PendingTune(
                                     label = "恢复上次调节",
-                                    before = savedGlobal.selected.displayName(),
-                                    after = "恢复已保存的逐项原值",
+                                    before = if (savedGlobal.selectionKnown) savedGlobal.selected.displayName() else "当前模式未知",
+                                    after = recovery.previousConfiguration?.let {
+                                        "${it.selected.displayName()} · ${it.provider.displayName()}"
+                                    } ?: "恢复系统原值；对应全局模式未知",
                                     recoveryPlan = recovery
                                 )
                             }
                         }
+                    )
+                }
+            }
+        }
+        item {
+            val installed = (packLoad as? SchedulerPackLoad.Loaded)?.value
+            val selected = installed?.selectedVariant
+            val device = remember(packLoad) { AndroidSchedulerDeviceProbe.probe() }
+            QijingSurfaceGroup(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                PageSectionHeader("配置调度引擎", "导入 Scene 兼容配置并绑定当前设备", Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                NativeListRow(
+                    title = "配置包",
+                    supporting = installed?.pack?.module?.let { "${it.name} · ${it.version.orEmpty()}" }
+                        ?: "仅导入声明式 JSON，不执行压缩包脚本",
+                    status = if (installed == null) "导入 ›" else "更换 ›",
+                    onClick = {
+                        if (SceneServiceStateStore(context).current().phase != SceneServicePhase.STOPPED) {
+                            resultMessage = "请先停止自动化并完成恢复，再更换配置包"
+                            resultError = true
+                        } else {
+                            packPicker.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed"))
+                        }
+                    }
+                )
+                HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                NativeListRow(
+                    title = "设备变体",
+                    supporting = selected?.relativePath
+                        ?: if (installed == null) "先导入配置包" else "必须通过 SoC、核心集合与簇拓扑检查",
+                    status = when {
+                        selected != null -> "已匹配 ›"
+                        installed != null -> "选择 ›"
+                        else -> "未配置"
+                    },
+                    onClick = if (installed != null) ({ showPackSheet = true }) else null
+                )
+                if (selected != null) {
+                    HorizontalDivider(Modifier.padding(start = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    NativeListRow(
+                        title = "运行范围",
+                        supporting = "四档模式 · 应用/游戏路由 · CPU/GPU/cpuset/线程规则",
+                        status = if (selected.compatibilityWith(device).compatible) "可预演" else "设备不匹配"
                     )
                 }
             }
@@ -299,7 +415,46 @@ internal fun TuningScreen(dataStore: NewDataStore) {
                 Text("• 系统参数按 CPU policy 分别快照、写入和读回", style = MaterialTheme.typography.bodyMedium)
                 Text("• Uperf/fas-rs 只接受固定身份、固定模式和固定路径", style = MaterialTheme.typography.bodyMedium)
                 Text("• Uperf/UperfGT/fas-rs 仅使用固定模式接口与读回验证", style = MaterialTheme.typography.bodyMedium)
-                Text("• ZRAM 重建、核心上下线、温控移除和任意 Shell 继续关闭", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("• 配置包只读取声明式 JSON；压缩包脚本不会被解压或执行", style = MaterialTheme.typography.bodyMedium)
+                Text("• 节点写入、刷新率和线程动作都必须完成读回验证", style = MaterialTheme.typography.bodyMedium)
+                Text("• 温控移除、分区修改和配置外任意 Shell 不进入执行链", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+
+    if (showPackSheet) {
+        val installed = (packLoad as? SchedulerPackLoad.Loaded)?.value
+        val device = remember(packLoad) { AndroidSchedulerDeviceProbe.probe() }
+        ModalBottomSheet(onDismissRequest = { showPackSheet = false }) {
+            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                Text("选择设备变体", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(20.dp))
+                if (installed == null) {
+                    Text("尚未导入配置包", modifier = Modifier.padding(horizontal = 20.dp))
+                } else installed.pack.variants.forEach { variant ->
+                    val compatibility = variant.compatibilityWith(device)
+                    NativeListRow(
+                        title = variant.categoryPath.joinToString(" · ").ifBlank { variant.relativePath },
+                        supporting = if (compatibility.compatible) {
+                            "${variant.hardware.topology.canonical} 核心拓扑 · 可用于当前设备"
+                        } else {
+                            "不可用：${compatibility.mismatches.joinToString()}"
+                        },
+                        onClick = if (compatibility.compatible) ({
+                            if (SceneServiceStateStore(context).current().phase != SceneServicePhase.STOPPED) {
+                                resultMessage = "请先停止自动化并完成恢复，再更换设备变体"
+                                resultError = true
+                                return@NativeListRow
+                            }
+                            val saved = packStore.selectVariant(variant.id, device)
+                            if (saved) disableProfileScenes(dataStore)
+                            packLoad = packStore.load()
+                            resultMessage = if (saved) "已选择 ${variant.categoryPath.joinToString(" · ")}" else "设备变体保存失败"
+                            resultError = !saved
+                            if (saved) showPackSheet = false
+                        }) else null,
+                        trailing = { RadioButton(installed.selectedVariantId == variant.id, null, enabled = compatibility.compatible) }
+                    )
+                }
             }
         }
     }
@@ -313,7 +468,10 @@ internal fun TuningScreen(dataStore: NewDataStore) {
                         title = mode.displayName(),
                         supporting = mode.description(),
                         onClick = {
-                            draftGlobal = draftGlobal.copy(selected = TuningProfileReference.BuiltIn(mode))
+                            draftGlobal = draftGlobal.copy(
+                                selected = TuningProfileReference.BuiltIn(mode),
+                                selectionKnown = true
+                            )
                             showModeSheet = false
                         },
                         trailing = { RadioButton((draftGlobal.selected as? TuningProfileReference.BuiltIn)?.mode == mode, null) }
@@ -329,7 +487,10 @@ internal fun TuningScreen(dataStore: NewDataStore) {
                 Text("选择调度控制方", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(20.dp))
                 SchedulerProviderId.entries.forEach { provider ->
                     val probe = probes.firstOrNull { it.provider == provider }
-                    val available = provider == SchedulerProviderId.SYSTEM || probe?.availability in setOf(SchedulerAvailability.READY, SchedulerAvailability.DEGRADED)
+                    val profileReady = provider == SchedulerProviderId.QIJING_PROFILE &&
+                        (packLoad as? SchedulerPackLoad.Loaded)?.value?.selectedVariant != null
+                    val available = provider == SchedulerProviderId.SYSTEM || profileReady ||
+                        probe?.availability in setOf(SchedulerAvailability.READY, SchedulerAvailability.DEGRADED)
                     NativeListRow(
                         title = provider.displayName(),
                         supporting = probe?.detail ?: if (provider == SchedulerProviderId.SYSTEM) "按栖境白名单调节 CPU 与内存" else "当前执行方式未检测到",
@@ -409,14 +570,39 @@ internal fun TuningScreen(dataStore: NewDataStore) {
                 Button(modifier = Modifier.fillMaxWidth(), enabled = !applying, onClick = {
                     applying = true
                     scope.launch {
-                        val result = applyManualTune(context, backend, plan, recoveryStore)
+                        val result = applyManualTune(context, backend, plan, recoveryStore, savedGlobal)
                         var message = result.first
                         var success = result.second
+                        if (success && backend != ExecutionBackend.DRY_RUN && plan.recoveryPlan != null) {
+                            dataStore.scenes().filter { it.enabled && it.followsGlobalProfile }
+                                .forEach { dataStore.saveScene(it.copy(enabled = false)) }
+                            val restored = profileStore.restoreAfterVerifiedRecovery(
+                                plan.recoveryPlan.previousConfiguration
+                            )
+                            if (restored != null) {
+                                globalApprovalStore.clear()
+                                savedGlobal = restored
+                                draftGlobal = restored
+                                message += if (restored.selectionKnown) {
+                                    " 全局模式已同步切回 ${restored.selected.displayName()}；跟随场景已停用，需重新预演。"
+                                } else {
+                                    " 系统原值已恢复；旧计划未记录对应模式，当前全局状态已标记为未知；跟随场景已停用，请重新选择并预演。"
+                                }
+                            } else {
+                                success = false
+                                message += " 系统原值已恢复，但全局配置状态无法持久化；跟随场景已停用，请勿继续自动化。"
+                            }
+                        }
                         if (success && plan.globalConfiguration != null) {
+                            globalApprovalStore.clear()
                             dataStore.scenes().filter { it.enabled && it.followsGlobalProfile }
                                 .forEach { dataStore.saveScene(it.copy(enabled = false)) }
                             val saved = saveGlobal(profileStore, savedGlobal, plan.globalConfiguration)
                             if (saved != null) {
+                                if (!globalApprovalStore.approve(saved, backend)) {
+                                    success = false
+                                    message += " 全局模式已保存，但自动化批准记录无法持久化；请勿启动自动化。"
+                                }
                                 savedGlobal = saved
                                 draftGlobal = saved
                                 message += if (backend == ExecutionBackend.DRY_RUN) " 全局意图已保存；跟随场景需重新预演。" else " 全局模式已保存；跟随场景需重新预演。"
@@ -570,19 +756,47 @@ private suspend fun probeSchedulers(context: Context, backend: ExecutionBackend)
     }
 }
 
+private fun disableProfileScenes(dataStore: NewDataStore) {
+    dataStore.scenes().filter { it.enabled && it.schedulerProvider == SchedulerProviderId.QIJING_PROFILE }
+        .forEach { dataStore.saveScene(it.copy(enabled = false)) }
+}
+
 private suspend fun applyManualTune(
     context: Context,
     backend: ExecutionBackend,
     plan: PendingTune,
-    recoveryStore: SharedPreferencesGlobalTuningRecoveryStore
+    recoveryStore: SharedPreferencesGlobalTuningRecoveryStore,
+    previousConfiguration: GlobalTuningConfiguration
 ): Pair<String, Boolean> = withContext(Dispatchers.IO) {
     val runtime = BackendRuntimeFactory.create(context, backend)
     try {
-        val snapshots = runtime.readCapability?.let { SceneSnapshotManager(CapabilityValueReader(it)) }
+        val snapshots = runtime.readCommand?.let { SceneSnapshotManager(CommandValueReader(it)) }
+            ?: runtime.readCapability?.let { SceneSnapshotManager(CapabilityValueReader(it)) }
         val journal = if (backend in setOf(ExecutionBackend.ROOT, ExecutionBackend.SHIZUKU)) SharedPreferencesSceneTransactionJournalStore(context) else null
-        val engine = SceneEngine(runtime.broker, SharedPreferencesTaskLogStore(context), snapshots, journal)
+        val recoveryCommands = runCatching { plan.recoveryPlan?.toForwardCommands() }.getOrElse { error ->
+            return@withContext "恢复计划无法转换：${error.message ?: "未知错误"}" to false
+        }
+        val engine = SceneEngine(
+            runtime.broker,
+            SharedPreferencesTaskLogStore(context),
+            snapshots,
+            journal,
+            commandExpander = recoveryCommands?.let { commands ->
+                SceneCommandExpander { SceneCommandExpansion.Commands(commands) }
+            } ?: InstalledProfileSceneExpander(
+                context,
+                runtime.readCommand,
+                enableThreadRuntime = backend == ExecutionBackend.ROOT,
+                executionBackend = backend
+            )
+        )
         val targetScene = try {
-            plan.recoveryPlan?.toSceneProfile() ?: SceneProfile(
+            if (recoveryCommands != null) SceneProfile(
+                id = "global-restore-${System.currentTimeMillis()}",
+                name = plan.label,
+                packageNames = emptySet(),
+                schedulerProvider = SchedulerProviderId.QIJING_PROFILE
+            ) else SceneProfile(
                 id = "manual-${System.currentTimeMillis()}",
                 name = plan.label,
                 packageNames = emptySet(),
@@ -601,7 +815,12 @@ private suspend fun applyManualTune(
         when {
             result.failure == null && backend == ExecutionBackend.DRY_RUN -> "${plan.label}预演完成，系统未修改。" to true
             result.failure == null -> {
-                val committed = journal != null && commitVerifiedGlobalTransaction(journal, recoveryStore, plan.label)
+                val committed = journal != null && commitVerifiedGlobalTransaction(
+                    journal,
+                    recoveryStore,
+                    plan.label,
+                    previousConfiguration
+                )
                 if (committed) "${plan.label}已写入并读回验证；可从调节页撤销。" to true
                 else "写入已验证，但无法提交可撤销记录；恢复 journal 已保留，自动化保持锁定。" to false
             }
@@ -625,8 +844,15 @@ private fun saveGlobal(
     current: GlobalTuningConfiguration,
     requested: GlobalTuningConfiguration
 ): GlobalTuningConfiguration? {
-    if (requested.selected == current.selected && requested.provider == current.provider) return current
-    val next = requested.copy(revision = current.revision + 1, updatedAtMs = System.currentTimeMillis())
+    if (requested.selected == current.selected &&
+        requested.provider == current.provider &&
+        requested.selectionKnown == current.selectionKnown
+    ) return current
+    val next = requested.copy(
+        revision = current.revision + 1,
+        updatedAtMs = System.currentTimeMillis(),
+        selectionKnown = true
+    )
     return next.takeIf { store.compareAndSet(current.revision, it) }
 }
 
@@ -641,6 +867,7 @@ private fun SchedulerProviderId.displayName(): String = when (this) {
     SchedulerProviderId.UPERF_GT -> "UperfGT"
     SchedulerProviderId.FAS_RS -> "fas-rs"
     SchedulerProviderId.CONFIG_BRIDGE -> "配置调度器"
+    SchedulerProviderId.QIJING_PROFILE -> "栖境配置引擎"
 }
 
 private fun SchedulerMode.description(): String = when (this) {

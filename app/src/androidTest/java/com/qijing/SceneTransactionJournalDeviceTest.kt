@@ -29,7 +29,7 @@ class SceneTransactionJournalDeviceTest {
     @Before fun clearBefore() = clearPrefs()
     @After fun clearAfter() = clearPrefs()
 
-    @Test fun persistedJournalLoadsFromNewStoreAndRecovers() = runBlocking {
+    @Test fun persistedLegacyWriteStartedJournalLoadsAndLocksAutomaticRecovery() = runBlocking {
         val first = SharedPreferencesSceneTransactionJournalStore(context)
         val journal = SceneTransactionJournal(
             transactionId = "device-tx",
@@ -58,9 +58,9 @@ class SceneTransactionJournalDeviceTest {
             }
         }).recoverPending()
 
-        assertTrue(result.succeeded)
-        assertEquals(listOf("memory.swappiness.set.restore"), calls)
-        assertEquals(SceneJournalLoad.None, second.load())
+        assertEquals("JOURNAL_WRITE_STATE_UNVERIFIED", (result.failure as ExecutionResult.Failed).code)
+        assertTrue(calls.isEmpty())
+        assertTrue(second.load() is SceneJournalLoad.Loaded)
     }
 
     @Test fun corruptJournalFailsClosed() {

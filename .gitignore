@@ -9,4 +9,5 @@ local.properties
 # APK analysis workspace and generated reports
 work/
 outputs/
+.artifacts/
 decoded_AndroidManifest.xml

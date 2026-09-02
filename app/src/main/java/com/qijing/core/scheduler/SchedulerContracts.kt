@@ -12,7 +12,7 @@ enum class SchedulerMode(val stableId: String) {
     }
 }
 
-enum class SchedulerProviderId { SYSTEM, UPERF, UPERF_GT, FAS_RS, CONFIG_BRIDGE }
+enum class SchedulerProviderId { SYSTEM, UPERF, UPERF_GT, FAS_RS, CONFIG_BRIDGE, QIJING_PROFILE }
 
 enum class SchedulerCapability { IDENTITY_READ, STATUS_READ, MODE_PLAN }
 
