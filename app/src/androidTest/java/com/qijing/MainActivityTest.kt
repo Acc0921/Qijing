@@ -39,6 +39,7 @@ class MainActivityTest {
             composeRule.onNodeWithTag("fps-start").performClick()
             composeRule.onNodeWithTag("fps-stop").assertIsDisplayed()
             composeRule.onNodeWithTag("fps-stop").performClick()
+            composeRule.onNodeWithText("本次会话已完成").assertIsDisplayed()
         }
     }
 

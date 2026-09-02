@@ -235,6 +235,7 @@ private fun LiveReading(
     onToggle: () -> Unit
 ) {
     val stateLabel = when {
+        !running && activeSessionId != null -> "本次会话已完成"
         !running -> "未记录"
         sample == null -> "正在等待帧数据"
         sample.jankCount == 0 -> "记录中 · 无卡顿报告"
@@ -242,6 +243,7 @@ private fun LiveReading(
         else -> "记录中 · 卡顿帧较多"
     }
     val stateColor = when {
+        !running && activeSessionId != null -> QijingMint
         !running -> MaterialTheme.colorScheme.onSurfaceVariant
         sample == null -> MaterialTheme.colorScheme.primary
         sample.jankCount == 0 -> QijingMint
