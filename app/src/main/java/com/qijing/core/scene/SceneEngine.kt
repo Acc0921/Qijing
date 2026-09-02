@@ -270,6 +270,7 @@ class SceneEngine(
                 com.qijing.core.scheduler.SchedulerProviderId.UPERF -> "scheduler.uperf.mode.set"
                 com.qijing.core.scheduler.SchedulerProviderId.UPERF_GT -> "scheduler.uperf_gt.mode.set"
                 com.qijing.core.scheduler.SchedulerProviderId.FAS_RS -> "scheduler.fas_rs.mode.set"
+                com.qijing.core.scheduler.SchedulerProviderId.CONFIG_BRIDGE -> "scheduler.config_bridge.mode.set"
                 com.qijing.core.scheduler.SchedulerProviderId.SYSTEM -> return@buildList
             }
             add(CapabilityCommand(capability, mapOf("value" to mode.stableId)))

@@ -118,6 +118,10 @@ object PrivilegedReadCommandMapper {
                     "tr -d '[:space:]' < /sdcard/Android/yc/uperf/cur_powermode.txt"
             "scheduler.fas_rs.mode.set" ->
                 "grep -qx 'id=fas-rs' /data/adb/modules/fas-rs/module.prop && tr -d '[:space:]' < /dev/fas_rs/mode"
+            "scheduler.config_bridge.mode.set" ->
+                "grep -qx 'id=Scene_Config_replace' /data/adb/modules/Scene_Config_replace/module.prop && " +
+                    "grep -qx 'qijing-scheduler-bridge-v1' /data/adb/modules/Scene_Config_replace/qijing/contract && " +
+                    "tr -d '[:space:]' < /data/adb/modules/Scene_Config_replace/qijing/current_mode"
             "scheduler.uperf.probe" -> moduleProbe(
                 "/data/adb/modules/uperf/module.prop",
                 "/sdcard/Android/yc/uperf/cur_powermode.txt",
@@ -133,6 +137,7 @@ object PrivilegedReadCommandMapper {
                 "/dev/fas_rs/mode",
                 "/dev/fas_rs/mode"
             )
+            "scheduler.config_bridge.probe" -> configBridgeProbe()
             "cpu.governor.set" -> firstPolicyValue("scaling_governor")
             "cpu.min_frequency.set" -> firstPolicyValue("scaling_min_freq")
             "cpu.max_frequency.set" -> firstPolicyValue("scaling_max_freq")
@@ -155,6 +160,21 @@ object PrivilegedReadCommandMapper {
             "mode=\"\$([ -r '$modePath' ] && tr -d '[:space:]' < '$modePath')\"; " +
             "ready=0; [ -e '$switchPath' ] && ready=1; " +
             "printf '%s\\n%s\\n%s\\n%s\\n%s' \"\$id\" \"\$name\" \"\$version\" \"\$mode\" \"\$ready\""
+
+    private fun configBridgeProbe(): String {
+        val base = "/data/adb/modules/Scene_Config_replace"
+        val moduleProp = "$base/module.prop"
+        val bridge = "$base/qijing"
+        return "[ -f '$moduleProp' ] || exit 1; " +
+            "id=\"\$(sed -n 's/^id=//p' '$moduleProp' | head -n 1)\"; " +
+            "name=\"\$(sed -n 's/^name=//p' '$moduleProp' | head -n 1)\"; " +
+            "version=\"\$(sed -n 's/^version=//p' '$moduleProp' | head -n 1)\"; " +
+            "mode=''; ready=0; " +
+            "if [ -r '$bridge/contract' ] && grep -qx 'qijing-scheduler-bridge-v1' '$bridge/contract'; then " +
+            "mode=\"\$([ -r '$bridge/current_mode' ] && tr -d '[:space:]' < '$bridge/current_mode')\"; " +
+            "[ -x '$bridge/apply-mode' ] && [ -n \"\$mode\" ] && ready=1; fi; " +
+            "printf '%s\\n%s\\n%s\\n%s\\n%s' \"\$id\" \"\$name\" \"\$version\" \"\$mode\" \"\$ready\""
+    }
 
     private val POLICY_CAPABILITY = Regex("cpu\\.policy\\.([0-9]{1,3})\\.(governor|min_frequency|max_frequency)\\.set")
 }

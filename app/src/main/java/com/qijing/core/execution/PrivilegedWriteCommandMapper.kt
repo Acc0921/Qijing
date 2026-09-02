@@ -34,6 +34,7 @@ object PrivilegedWriteCommandMapper {
             "scheduler.uperf.mode.set" -> mapUperfMode(command, restore)
             "scheduler.uperf_gt.mode.set" -> mapUperfGtMode(command, restore)
             "scheduler.fas_rs.mode.set" -> mapFasRsMode(command)
+            "scheduler.config_bridge.mode.set" -> mapConfigBridgeMode(command)
             "cpu.governor.set" -> {
                 val value = command.singleValue("value")
                     ?: return Result.Invalid("cpu.governor.set requires only a value argument")
@@ -117,6 +118,21 @@ object PrivilegedWriteCommandMapper {
                 "grep -qx 'id=fas-rs' /data/adb/modules/fas-rs/module.prop && [ -e '$node' ] && " +
                 "printf '%s\\n' '$value' > '$node' && " +
                 "[ \"\$(tr -d '[:space:]' < '$node')\" = '$value' ]"
+        )
+    }
+
+    private fun mapConfigBridgeMode(command: CapabilityCommand): Result {
+        val value = command.singleValue("value")
+            ?: return Result.Invalid("${command.capability} requires only a value argument")
+        if (value !in SCHEDULER_MODES) return Result.Invalid("Unsupported configuration bridge mode")
+        val base = "/data/adb/modules/Scene_Config_replace"
+        val bridge = "$base/qijing"
+        val identity = "[ -f '$base/module.prop' ] && " +
+            "grep -qx 'id=Scene_Config_replace' '$base/module.prop' && " +
+            "grep -qx 'qijing-scheduler-bridge-v1' '$bridge/contract' && [ -x '$bridge/apply-mode' ]"
+        return Result.Command(
+            "$identity && '$bridge/apply-mode' '$value' && " +
+                "[ \"\$(tr -d '[:space:]' < '$bridge/current_mode')\" = '$value' ]"
         )
     }
 

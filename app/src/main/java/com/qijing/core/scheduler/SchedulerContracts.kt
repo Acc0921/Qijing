@@ -12,7 +12,7 @@ enum class SchedulerMode(val stableId: String) {
     }
 }
 
-enum class SchedulerProviderId { SYSTEM, UPERF, UPERF_GT, FAS_RS }
+enum class SchedulerProviderId { SYSTEM, UPERF, UPERF_GT, FAS_RS, CONFIG_BRIDGE }
 
 enum class SchedulerCapability { IDENTITY_READ, STATUS_READ, MODE_PLAN }
 
@@ -41,7 +41,7 @@ data class SchedulerModePlan(
     val contractVersion: Int = 1
 )
 
-enum class SchedulerOperation { UPERF_MODE_SWITCH, FAS_RS_MODE_SWITCH }
+enum class SchedulerOperation { UPERF_MODE_SWITCH, FAS_RS_MODE_SWITCH, CONFIG_BRIDGE_MODE_SWITCH }
 
 sealed interface SchedulerPlanResult {
     data class Planned(val plan: SchedulerModePlan) : SchedulerPlanResult

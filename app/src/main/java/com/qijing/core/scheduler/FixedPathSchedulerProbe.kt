@@ -10,7 +10,11 @@ enum class FixedSchedulerPath(val absolutePath: String) {
     // UperfGT intentionally keeps the upstream Magisk module ID/path and is distinguished by name.
     UPERF_GT_MODULE_PROP("/data/adb/modules/uperf/module.prop"),
     FAS_RS_MODULE_PROP("/data/adb/modules/fas-rs/module.prop"),
-    FAS_RS_MODE_NODE("/dev/fas_rs/mode")
+    FAS_RS_MODE_NODE("/dev/fas_rs/mode"),
+    CONFIG_BRIDGE_MODULE_PROP("/data/adb/modules/Scene_Config_replace/module.prop"),
+    CONFIG_BRIDGE_CONTRACT("/data/adb/modules/Scene_Config_replace/qijing/contract"),
+    CONFIG_BRIDGE_MODE_STATE("/data/adb/modules/Scene_Config_replace/qijing/current_mode"),
+    CONFIG_BRIDGE_MODE_SWITCH("/data/adb/modules/Scene_Config_replace/qijing/apply-mode")
 }
 
 data class FixedPathStatus(

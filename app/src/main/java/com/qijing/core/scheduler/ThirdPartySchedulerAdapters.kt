@@ -156,3 +156,61 @@ class FasRsSchedulerAdapter(
         } else SchedulerPlanResult.Unavailable(provider, probe.detail)
     }
 }
+
+/**
+ * Compatibility boundary for configuration-only scheduler modules.
+ *
+ * The module identity alone is deliberately insufficient. A module becomes controllable only
+ * after it exposes the Qijing bridge token, a readable verified mode state, and a fixed switch
+ * entry. The original configuration replacement package exposes none of these, so it is detected
+ * without being presented as ready or executable.
+ */
+class ConfigBridgeSchedulerAdapter(
+    private val reader: FixedSchedulerPathReader = LocalFixedSchedulerPathReader()
+) : FixedPathSchedulerAdapter(
+    SchedulerProviderId.CONFIG_BRIDGE,
+    reader,
+    FixedSchedulerPath.CONFIG_BRIDGE_MODULE_PROP,
+    setOf("Scene_Config_replace"),
+    setOf("若晴· Scene二改调度线程")
+) {
+    override fun probe(): SchedulerProbeResult {
+        val (identity, failure) = verifiedIdentity()
+        failure?.let { return it }
+        val contract = reader.readUtf8(FixedSchedulerPath.CONFIG_BRIDGE_CONTRACT, CONTRACT_LIMIT)?.trim()
+        val contractReady = contract == CONTRACT_TOKEN
+        val switchReady = pathReady(FixedSchedulerPath.CONFIG_BRIDGE_MODE_SWITCH)
+        val mode = if (contractReady) readMode(FixedSchedulerPath.CONFIG_BRIDGE_MODE_STATE) else null
+        val ready = contractReady && switchReady && mode != null
+        return SchedulerProbeResult(
+            provider = provider,
+            availability = if (ready) SchedulerAvailability.READY else SchedulerAvailability.DETECTED,
+            version = identity.version,
+            activeMode = mode,
+            capabilities = buildSet {
+                add(SchedulerCapability.IDENTITY_READ)
+                if (mode != null) add(SchedulerCapability.STATUS_READ)
+                if (ready) add(SchedulerCapability.MODE_PLAN)
+            },
+            detail = if (ready) {
+                "配置调度桥接已验证，可读取并规划四档模式"
+            } else {
+                "已识别配置模块，但缺少栖境桥接、可信读回或固定切换入口；真实控制已阻止"
+            }
+        )
+    }
+
+    override fun planMode(mode: SchedulerMode): SchedulerPlanResult {
+        val probe = probe()
+        return if (probe.availability == SchedulerAvailability.READY && SchedulerCapability.MODE_PLAN in probe.capabilities) {
+            SchedulerPlanResult.Planned(
+                SchedulerModePlan(provider, mode, SchedulerOperation.CONFIG_BRIDGE_MODE_SWITCH)
+            )
+        } else SchedulerPlanResult.Unavailable(provider, probe.detail)
+    }
+
+    private companion object {
+        const val CONTRACT_TOKEN = "qijing-scheduler-bridge-v1"
+        const val CONTRACT_LIMIT = 64
+    }
+}

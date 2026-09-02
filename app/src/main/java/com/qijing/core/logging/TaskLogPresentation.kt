@@ -54,6 +54,7 @@ private fun String.displayCapability(): String {
         startsWith("scheduler.uperf_gt") -> "UperfGT 调度"
         startsWith("scheduler.uperf") -> "Uperf 调度"
         startsWith("scheduler.fas_rs") -> "fas-rs 调度"
+        startsWith("scheduler.config_bridge") -> "配置调度桥接"
         else -> "调节任务"
     }
     val action = when {

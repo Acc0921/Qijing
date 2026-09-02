@@ -16,6 +16,7 @@ class PrivilegedSchedulerProbe(
             SchedulerProviderId.UPERF -> "scheduler.uperf.probe"
             SchedulerProviderId.UPERF_GT -> "scheduler.uperf_gt.probe"
             SchedulerProviderId.FAS_RS -> "scheduler.fas_rs.probe"
+            SchedulerProviderId.CONFIG_BRIDGE -> "scheduler.config_bridge.probe"
             SchedulerProviderId.SYSTEM -> error("handled above")
         }
         val raw = readCapability(capability)
@@ -26,6 +27,7 @@ class PrivilegedSchedulerProbe(
             SchedulerProviderId.UPERF -> "uperf" to "Uperf"
             SchedulerProviderId.UPERF_GT -> "uperf" to "Uperf Game Turbo"
             SchedulerProviderId.FAS_RS -> "fas-rs" to "fas-rs"
+            SchedulerProviderId.CONFIG_BRIDGE -> "Scene_Config_replace" to "若晴· Scene二改调度线程"
             SchedulerProviderId.SYSTEM -> error("handled above")
         }
         if (lines[0] != expected.first || lines[1] != expected.second) {

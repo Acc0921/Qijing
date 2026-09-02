@@ -36,4 +36,27 @@ class SchedulerAndPolicyCommandMapperTest {
         assertTrue(mapped.shell.contains("name=Uperf Game Turbo"))
         assertTrue(mapped.shell.contains("/data/powercfg.sh 'balance'"))
     }
+
+    @Test fun `configuration bridge cannot run without fixed contract and readback`() {
+        val mapped = PrivilegedWriteCommandMapper.map(
+            CapabilityCommand("scheduler.config_bridge.mode.set", mapOf("value" to "performance"))
+        ) as PrivilegedWriteCommandMapper.Result.Command
+        val rejected = PrivilegedWriteCommandMapper.map(
+            CapabilityCommand("scheduler.config_bridge.mode.set", mapOf("value" to "performance; reboot"))
+        )
+
+        assertTrue(mapped.shell.contains("qijing-scheduler-bridge-v1"))
+        assertTrue(mapped.shell.contains("apply-mode' 'performance'"))
+        assertTrue(mapped.shell.contains("current_mode"))
+        assertFalse(mapped.shell.contains("powercfg.sh"))
+        assertTrue(rejected is PrivilegedWriteCommandMapper.Result.Invalid)
+    }
+
+    @Test fun `configuration bridge snapshot uses only fixed verified state`() {
+        val read = PrivilegedReadCommandMapper.map("scheduler.config_bridge.mode.set")
+
+        assertTrue(read!!.contains("Scene_Config_replace/module.prop"))
+        assertTrue(read.contains("qijing-scheduler-bridge-v1"))
+        assertTrue(read.contains("current_mode"))
+    }
 }

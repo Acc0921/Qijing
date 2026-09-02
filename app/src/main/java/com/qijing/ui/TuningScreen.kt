@@ -64,6 +64,7 @@ import com.qijing.core.model.ExecutionBackend
 import com.qijing.core.model.MemoryIntent
 import com.qijing.core.model.SceneProfile
 import com.qijing.core.scheduler.FasRsSchedulerAdapter
+import com.qijing.core.scheduler.ConfigBridgeSchedulerAdapter
 import com.qijing.core.scheduler.PrivilegedSchedulerProbe
 import com.qijing.core.scheduler.SchedulerAvailability
 import com.qijing.core.scheduler.SchedulerMode
@@ -562,8 +563,8 @@ private suspend fun probeSchedulers(context: Context, backend: ExecutionBackend)
         val privileged = runtime.readCapability
         if (privileged != null) {
             val probe = PrivilegedSchedulerProbe(privileged)
-            listOf(system, probe.probe(SchedulerProviderId.UPERF), probe.probe(SchedulerProviderId.UPERF_GT), probe.probe(SchedulerProviderId.FAS_RS))
-        } else listOf(system, UperfSchedulerAdapter().probe(), UperfGtSchedulerAdapter().probe(), FasRsSchedulerAdapter().probe())
+            listOf(system, probe.probe(SchedulerProviderId.UPERF), probe.probe(SchedulerProviderId.UPERF_GT), probe.probe(SchedulerProviderId.FAS_RS), probe.probe(SchedulerProviderId.CONFIG_BRIDGE))
+        } else listOf(system, UperfSchedulerAdapter().probe(), UperfGtSchedulerAdapter().probe(), FasRsSchedulerAdapter().probe(), ConfigBridgeSchedulerAdapter().probe())
     } finally {
         runtime.close()
     }
@@ -639,6 +640,7 @@ private fun SchedulerProviderId.displayName(): String = when (this) {
     SchedulerProviderId.UPERF -> "Uperf"
     SchedulerProviderId.UPERF_GT -> "UperfGT"
     SchedulerProviderId.FAS_RS -> "fas-rs"
+    SchedulerProviderId.CONFIG_BRIDGE -> "配置调度器"
 }
 
 private fun SchedulerMode.description(): String = when (this) {

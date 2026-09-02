@@ -28,6 +28,7 @@ data class GlobalTuningRecoveryPlan(
         commands.any { !it.capability.endsWith(".restore") } -> "恢复命令类型无效"
         commands.any { PrivilegedWriteCommandMapper.map(it) !is PrivilegedWriteCommandMapper.Result.Command } -> "恢复命令不在白名单"
         commands.any { it.capability in setOf("scheduler.uperf.mode.set.restore", "scheduler.uperf_gt.mode.set.restore") && SchedulerMode.fromStableId(it.arguments["value"].orEmpty()) == null } -> "Uperf 当前模式不能安全转换为可撤销计划"
+        commands.any { it.capability == "scheduler.config_bridge.mode.set.restore" && SchedulerMode.fromStableId(it.arguments["value"].orEmpty()) == null } -> "配置调度桥接当前模式不能安全转换为可撤销计划"
         else -> null
     }
 
@@ -68,6 +69,10 @@ data class GlobalTuningRecoveryPlan(
                 }
                 "scheduler.fas_rs.mode.set" -> {
                     schedulerProvider = SchedulerProviderId.FAS_RS
+                    schedulerMode = SchedulerMode.fromStableId(value)
+                }
+                "scheduler.config_bridge.mode.set" -> {
+                    schedulerProvider = SchedulerProviderId.CONFIG_BRIDGE
                     schedulerMode = SchedulerMode.fromStableId(value)
                 }
             }

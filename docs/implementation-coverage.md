@@ -21,7 +21,8 @@
 | 场景轮询 | `core.scene.ScenePollingLoop` | 支持启动、停止和可配置间隔；每次有效采样都会协调一次，使同一前台应用下的停用/重新启用也能触发恢复或应用，协调器负责去重避免重复写入 |
 | 后台承载 | `core.scene.SceneTriggerService` / `SceneServiceStateStore` | 用户启动的自动化使用带明确用途的 `specialUse` FGS；具备 START_STICKY 安全重启、Android 15 超时入口、15 秒心跳和陈旧状态校准；异常退出锁定真实写入并依赖 journal 恢复，不在主线程阻塞等待 |
 | 场景快照与恢复 | `core.scene.SceneSnapshotManager` / `BrokerSceneRestoreExecutor` | Root/Shizuku 使用特权只读模板建立 CPU governor/频率及 swappiness 快照；正常恢复与重启恢复逐项持久化进度，重复恢复保持幂等；真机真实写后恢复仍待授权验收 |
-| 全局模式与第三方调度 | `feature.tuning.profile` / `core.scheduler` / `ui.TuningScreen` | 省电、均衡、性能、极速会按设备实际声明的 CPU policy 与 Governor 解析；可选择系统、Uperf、UperfGT 或 fas-rs 控制方，第三方只接受固定身份、固定路径、固定四档模式和读回验证。成功后保存撤销计划，跟随全局的场景会失效并要求重新预演 |
+| 全局模式与第三方调度 | `feature.tuning.profile` / `core.scheduler` / `ui.TuningScreen` | 省电、均衡、性能、极速会按设备实际声明的 CPU policy 与 Governor 解析；可选择系统、Uperf、UperfGT 或 fas-rs 控制方，第三方只接受固定身份、固定路径、固定四档模式和读回验证。新增配置模块兼容识别，但原包缺少栖境桥接、可信状态和验证入口时保持不可选择，不能冒充已支持；完整边界见 `configuration-scheduler-compatibility.md` |
+| 线程调度规则 | `core.scheduler.ThreadPlacementRules` | 已实现有界 JSON 子集、CPU 集合与设备核心交集校验、包名唯一性、线程名精确/单后缀通配匹配、默认归属及 RR/nice 意图决策；当前只生成确定性决策，不执行 affinity、cpuset、chrt 或 renice，Root 常驻执行器仍未开放 |
 | CPU 手动调节与观察 | `ui.TuningScreen` / `core.device.observation.CpuObservationReader` | 展示逐 policy Governor/当前与硬件频率范围、关联核心，并展示每核频率、在线状态与负载；点击 policy 可从设备实际候选中自定义 Governor 与频率范围，再经过预览、快照、高风险确认、写后读回和失败恢复；真机真实写尚未执行 |
 | GPU 只读观察 | `core.device.observation.GpuObservationReader` / `ui.TuningScreen` | 识别 KGSL、Mali 和通用 devfreq 固定节点，展示当前/范围频率、负载与 Governor；无可识别节点或无权限时明确降级，不开放 GPU 写入 |
 | 内存、ZRAM 与功耗 | `core.device.observation.MemoryObservationReader` / `BatteryObservationReader` / `ui.TuningScreen` | 展示 RAM、Swap、全部 ZRAM 设备、压缩数据/内存占用/算法，以及电池电流、电压、温度和电池侧瞬时或估算功率；swappiness 具备范围校验、预览、快照、确认、读回和恢复链路。ZRAM 重建继续关闭，功率不冒充 CPU/GPU 分项数据 |
@@ -37,7 +38,7 @@
 - 服务状态不再使用 Compose 临时布尔值；运行、停止恢复和恢复未确认状态在重建页面后保持一致，只有 `STOPPED` 能切换后端。
 - Root/Shizuku 已能通过特权 transport 读取快照，但尚未对真实 CPU 或 swappiness 执行写入、读回和恢复，因此不能标记为真机调节可用。
 - M4/M5 已补齐全局四档模式、逐 policy 自定义、第三方固定调度契约、每核 CPU/GPU/内存/ZRAM/电池侧功耗观察与手动安全调节；ZRAM、GPU 与核心上下线写入仍明确关闭。
-- API 23/API 35 模拟器均完成 15 项设备测试且 0 失败，Root-only 用例按设备条件跳过；JVM 112 项通过。模拟器条件跳过不能作为 Root 写入证据。
+- API 23/API 35 模拟器最近一次均完成 15 项设备测试且 0 失败，Root-only 用例按设备条件跳过；本次配置调度兼容改动后 JVM 119 项通过，Debug/Release APK 与 Lint 通过。模拟器条件跳过不能作为 Root 写入证据。
 
 ## 下一阶段完成定义
 
@@ -47,5 +48,6 @@
 2. 通过进程中断与部分恢复故障注入，人工核对总览/场景轨迹、通知和后端锁定是否一致。
 3. 完成长时 FPS 会话、TalkBack、200% 字体、深浅色与小屏人工走查。
 4. 若选择 Google Play 分发，提交 `specialUse` 前台服务与 `QUERY_ALL_PACKAGES` 的政策申报；GitHub 侧载不替代商店审核。
+5. 按 `configuration-scheduler-compatibility.md` 实现类型化配置编译器与 Root 线程调度执行器；配置模块只有身份而无可信状态时继续 fail-closed。
 
 完成口径继续遵循 [后端与恢复验收标准](backend-acceptance.md) 与 [场景链路工作台规格](scene-chain-workbench.md)，不以 debug 模拟或模拟器通过替代真实硬件写入结论。
