@@ -81,12 +81,19 @@ object AndroidSchedulerDeviceProbe {
         val socModel = if (Build.VERSION.SDK_INT >= 31) Build.SOC_MODEL else Build.HARDWARE
         return SchedulerPackDevice(
             socModel = socModel.ifBlank { Build.BOARD },
-            platform = Build.HARDWARE.takeIf(String::isNotBlank),
+            platform = preferredPlatform(Build.BOARD, Build.HARDWARE),
             cpuCores = cores,
             clusterCoreSets = clusters,
-            socIdentifiers = setOf(Build.BOARD, Build.DEVICE).filter(String::isNotBlank).toSet()
+            socIdentifiers = setOf(Build.BOARD, Build.HARDWARE, Build.DEVICE).filter(String::isNotBlank).toSet()
         )
     }
+
+    /**
+     * Android's Build.HARDWARE is commonly a generic vendor value such as "qcom". Configuration
+     * packs use the kernel platform codename, which is exposed by Build.BOARD on those devices.
+     */
+    internal fun preferredPlatform(board: String, hardware: String): String? =
+        board.trim().takeIf(String::isNotEmpty) ?: hardware.trim().takeIf(String::isNotEmpty)
 
     private fun discoverClusters(cores: Set<Int>): List<Set<Int>> = cores.mapNotNull { cpu ->
         parseCpuList(readText("/sys/devices/system/cpu/cpu$cpu/cpufreq/related_cpus")).takeIf(Set<Int>::isNotEmpty)

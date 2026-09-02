@@ -3,6 +3,8 @@ package com.qijing.ui
 import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.Check
@@ -28,6 +31,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RangeSlider
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -77,6 +81,8 @@ import com.qijing.core.scheduler.pack.SchedulerPackImportResult
 import com.qijing.core.scheduler.pack.SchedulerPackImporter
 import com.qijing.core.scheduler.pack.SchedulerPackLoad
 import com.qijing.core.scheduler.pack.SchedulerPackStore
+import com.qijing.core.scheduler.pack.SchedulerPackCompatibility
+import com.qijing.core.scheduler.pack.SchedulerPackVariant
 import com.qijing.core.scheduler.profile.InstalledProfileSceneExpander
 import com.qijing.core.scheduler.profile.ProfileCompileResult
 import com.qijing.core.scheduler.profile.ProfileCompiler
@@ -153,6 +159,7 @@ internal fun TuningScreen(dataStore: NewDataStore) {
     var showModeSheet by remember { mutableStateOf(false) }
     var showProviderSheet by remember { mutableStateOf(false) }
     var showPackSheet by remember { mutableStateOf(false) }
+    val modeSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var packLoad by remember(packStore) { mutableStateOf(packStore.load()) }
     var editingPolicy by remember { mutableStateOf<CpuPolicyObservation?>(null) }
     var policyGovernor by remember { mutableStateOf("") }
@@ -425,48 +432,77 @@ internal fun TuningScreen(dataStore: NewDataStore) {
     if (showPackSheet) {
         val installed = (packLoad as? SchedulerPackLoad.Loaded)?.value
         val device = remember(packLoad) { AndroidSchedulerDeviceProbe.probe() }
+        val rankedVariants = remember(installed, device) {
+            installed?.pack?.variants.orEmpty()
+                .map { variant -> variant to variant.compatibilityWith(device) }
+                .sortedWith(
+                    compareByDescending<Pair<SchedulerPackVariant, SchedulerPackCompatibility>> {
+                        it.second.compatible
+                    }.thenBy { it.first.categoryPath.joinToString(" · ") }
+                )
+        }
         ModalBottomSheet(onDismissRequest = { showPackSheet = false }) {
-            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-                Text("选择设备变体", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(20.dp))
-                if (installed == null) {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(bottom = 24.dp)
+            ) {
+                item {
+                    Text("选择设备变体", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(20.dp))
+                }
+                if (installed == null) item {
                     Text("尚未导入配置包", modifier = Modifier.padding(horizontal = 20.dp))
-                } else installed.pack.variants.forEach { variant ->
-                    val compatibility = variant.compatibilityWith(device)
-                    NativeListRow(
-                        title = variant.categoryPath.joinToString(" · ").ifBlank { variant.relativePath },
-                        supporting = if (compatibility.compatible) {
-                            "${variant.hardware.topology.canonical} 核心拓扑 · 可用于当前设备"
-                        } else {
-                            "不可用：${compatibility.mismatches.joinToString()}"
-                        },
-                        onClick = if (compatibility.compatible) ({
-                            if (SceneServiceStateStore(context).current().phase != SceneServicePhase.STOPPED) {
-                                resultMessage = "请先停止自动化并完成恢复，再更换设备变体"
-                                resultError = true
-                                return@NativeListRow
-                            }
-                            val saved = packStore.selectVariant(variant.id, device)
-                            if (saved) disableProfileScenes(dataStore)
-                            packLoad = packStore.load()
-                            resultMessage = if (saved) "已选择 ${variant.categoryPath.joinToString(" · ")}" else "设备变体保存失败"
-                            resultError = !saved
-                            if (saved) showPackSheet = false
-                        }) else null,
-                        trailing = { RadioButton(installed.selectedVariantId == variant.id, null, enabled = compatibility.compatible) }
-                    )
+                } else {
+                    item {
+                        val compatibleCount = rankedVariants.count { it.second.compatible }
+                        Text(
+                            if (compatibleCount > 0) "已优先显示 $compatibleCount 个匹配当前设备的变体"
+                            else "没有变体通过当前设备的 SoC、平台与核心拓扑检查",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                        )
+                    }
+                    items(rankedVariants, key = { it.first.id }) { (variant, compatibility) ->
+                        NativeListRow(
+                            title = variant.categoryPath.joinToString(" · ").ifBlank { variant.relativePath },
+                            supporting = if (compatibility.compatible) {
+                                "${variant.hardware.topology.canonical} 核心拓扑 · 可用于当前设备"
+                            } else {
+                                "不可用：${compatibility.mismatches.joinToString()}"
+                            },
+                            onClick = if (compatibility.compatible) ({
+                                if (SceneServiceStateStore(context).current().phase != SceneServicePhase.STOPPED) {
+                                    resultMessage = "请先停止自动化并完成恢复，再更换设备变体"
+                                    resultError = true
+                                    return@NativeListRow
+                                }
+                                val saved = packStore.selectVariant(variant.id, device)
+                                if (saved) disableProfileScenes(dataStore)
+                                packLoad = packStore.load()
+                                resultMessage = if (saved) "已选择 ${variant.categoryPath.joinToString(" · ")}" else "设备变体保存失败"
+                                resultError = !saved
+                                if (saved) showPackSheet = false
+                            }) else null,
+                            trailing = { RadioButton(installed.selectedVariantId == variant.id, null, enabled = compatibility.compatible) }
+                        )
+                    }
                 }
             }
         }
     }
 
     if (showModeSheet) {
-        ModalBottomSheet(onDismissRequest = { showModeSheet = false }) {
-            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-                Text("选择全局模式", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(20.dp))
-                SchedulerMode.entries.forEach { mode ->
+        ModalBottomSheet(
+            onDismissRequest = { showModeSheet = false },
+            sheetState = modeSheetState
+        ) {
+            LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                item { Text("选择全局模式", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(20.dp)) }
+                items(SchedulerMode.entries, key = { it.name }) { mode ->
                     NativeListRow(
                         title = mode.displayName(),
                         supporting = mode.description(),
+                        modifier = Modifier.testTag("global-mode-${mode.name}"),
                         onClick = {
                             draftGlobal = draftGlobal.copy(
                                 selected = TuningProfileReference.BuiltIn(mode),
@@ -483,9 +519,9 @@ internal fun TuningScreen(dataStore: NewDataStore) {
 
     if (showProviderSheet) {
         ModalBottomSheet(onDismissRequest = { showProviderSheet = false }) {
-            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-                Text("选择调度控制方", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(20.dp))
-                SchedulerProviderId.entries.forEach { provider ->
+            LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                item { Text("选择调度控制方", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(20.dp)) }
+                items(SchedulerProviderId.entries, key = { it.name }) { provider ->
                     val probe = probes.firstOrNull { it.provider == provider }
                     val profileReady = provider == SchedulerProviderId.QIJING_PROFILE &&
                         (packLoad as? SchedulerPackLoad.Loaded)?.value?.selectedVariant != null
@@ -509,7 +545,10 @@ internal fun TuningScreen(dataStore: NewDataStore) {
         val hardwareMin = policy.hardwareMinFrequencyKHz.value
         val hardwareMax = policy.hardwareMaxFrequencyKHz.value
         ModalBottomSheet(onDismissRequest = { editingPolicy = null }) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Text("${policy.id} 自定义调节", style = MaterialTheme.typography.titleLarge)
                 Text("作用核心 ${policy.relatedCores.sorted().joinToString()}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 policy.availableGovernors.value.orEmpty().sorted().forEach { governor ->
@@ -556,7 +595,10 @@ internal fun TuningScreen(dataStore: NewDataStore) {
 
     pending?.let { plan ->
         ModalBottomSheet(onDismissRequest = { if (!applying) pending = null }) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Text(if (backend == ExecutionBackend.DRY_RUN) "调节预演" else "确认特权调节", style = MaterialTheme.typography.titleLarge)
                 Text("${plan.label} · ${backend.displayName()}", color = if (backend == ExecutionBackend.DRY_RUN) QijingBlue else QijingAmber)
                 NativeListRow(title = "原值", supporting = plan.before)

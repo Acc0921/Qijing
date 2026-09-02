@@ -117,6 +117,43 @@ class ProfileCommandPlannerTest {
         assertTrue(result is ProfileCommandPlan.Rejected)
     }
 
+    @Test fun `accepts valid WALT hispeed thresholds outside the CPU OPP table`() {
+        val origin = OperationOrigin("test", index = 0)
+        val empty = CompiledProfileProgram(emptyMap(), emptyMap(), emptyList(), emptyMap(), emptyList())
+        val binding = ProfileDeviceBinding(
+            policyIds = listOf(0, 6),
+            availableFrequenciesKHz = mapOf(
+                0 to listOf(1152000, 1363200),
+                6 to listOf(2246400, 2438400)
+            )
+        )
+
+        val result = ProfileCommandPlanner().plan(
+            empty,
+            listOf(
+                ProfileOperation.HispeedFrequencies(
+                    listOf(ProfileValue("1344000"), ProfileValue("2380800")),
+                    origin
+                )
+            ),
+            binding
+        ) as ProfileCommandPlan.Planned
+
+        assertEquals(listOf("1344000", "2380800"), result.commands.map { it.arguments["value"] })
+    }
+
+    @Test fun `keeps CPU policy bounds strict against the OPP table`() {
+        val origin = OperationOrigin("test", index = 0)
+        val empty = CompiledProfileProgram(emptyMap(), emptyMap(), emptyList(), emptyMap(), emptyList())
+        val result = ProfileCommandPlanner().plan(
+            empty,
+            listOf(ProfileOperation.CpuFrequenciesMin(listOf(ProfileValue("1344000")), origin)),
+            ProfileDeviceBinding(listOf(0), mapOf(0 to listOf(1152000, 1363200)))
+        ) as ProfileCommandPlan.Rejected
+
+        assertEquals("PROFILE_FREQUENCY_UNSUPPORTED", result.code)
+    }
+
     private fun cpu(
         min: String,
         max: String,

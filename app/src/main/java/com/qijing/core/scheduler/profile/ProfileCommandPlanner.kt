@@ -105,9 +105,13 @@ class ProfileCommandPlanner {
     ): List<CapabilityCommand> {
         if (values.size != binding.policyIds.size) reject("PROFILE_POLICY_COUNT_MISMATCH", "配置策略数量与设备 CPU 簇不一致")
         return binding.policyIds.zip(values).map { (policy, value) ->
-            val resolved = if (node == "hispeed_freq" && value.text != "0") {
-                ProfileValue(resolveFrequency(value, binding, policy, zeroMeansMinimum = false).toString())
-            } else value
+            val resolved = when {
+                node != "hispeed_freq" || value.text == "0" -> value
+                value.notation != ValueNotation.PLAIN ->
+                    ProfileValue(resolveFrequency(value, binding, policy, zeroMeansMinimum = false).toString())
+                value.text.toLongOrNull()?.let { it in FREQUENCY_RANGE } == true -> value
+                else -> reject("PROFILE_FREQUENCY_INVALID", "policy$policy 的 WALT hispeed_freq ${value.text} 无效")
+            }
             node("/sys/devices/system/cpu/cpu$policy/cpufreq/${binding.governorDirectory}/$node", resolved)
         }
     }

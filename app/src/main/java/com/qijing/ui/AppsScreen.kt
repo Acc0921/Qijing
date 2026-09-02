@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -167,7 +169,7 @@ internal fun AppsScreen(store: NewDataStore, onCreateScene: (AppEntry) -> Unit) 
 
     if (showFilters) {
         ModalBottomSheet(onDismissRequest = { showFilters = false }) {
-            Column(Modifier.fillMaxWidth().padding(bottom = 28.dp)) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 28.dp)) {
                 Text("筛选应用", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
                 AppsFilterSection("应用范围") {
                     AppsFilterRow("用户应用", !includeSystem) {

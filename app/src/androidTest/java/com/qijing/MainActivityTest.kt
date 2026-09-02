@@ -53,8 +53,8 @@ class MainActivityTest {
     fun tuningExposesGlobalModesAndDeviceObservationTabs() {
         composeRule.onNodeWithTag("module-M4").performClick()
         composeRule.onNodeWithTag("global-mode-row").performScrollTo().performClick()
-        composeRule.onNodeWithText("极速").assertIsDisplayed()
-        composeRule.onNodeWithText("极速").performClick()
+        composeRule.onNodeWithTag("global-mode-EXTREME").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("global-mode-EXTREME").performClick()
         composeRule.onNodeWithTag("tuning-list").performScrollToNode(hasTestTag("tuning-tab-gpu"))
         composeRule.onNodeWithTag("tuning-tab-gpu").performClick()
         composeRule.onNodeWithText("GPU 实时状态").performScrollTo().assertIsDisplayed()

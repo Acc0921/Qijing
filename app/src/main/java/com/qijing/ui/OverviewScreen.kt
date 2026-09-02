@@ -3,6 +3,8 @@ package com.qijing.ui
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -393,7 +395,7 @@ private fun AutomationControlSection() {
 
     if (showBackendSheet) {
         ModalBottomSheet(onDismissRequest = { showBackendSheet = false }) {
-            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
                 Text("选择执行方式", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
                 Text(
                     "执行方式是全局安全环境。自动化未停止时不可切换；切换会停用已启用场景。",
